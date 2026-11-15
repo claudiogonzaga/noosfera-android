@@ -31,6 +31,7 @@ import {
 import { scheduleAllMedications } from '../services/medications';
 import { scheduleAllNudges } from '../services/nudges';
 import { refreshReviewNotification } from '../services/review';
+import { chainAlertMinute, isChainAlertEnabled, refreshChainAlert, setChainAlertEnabled } from '../services/chainAlert';
 import { isSleepHabitFormed } from '../services/habitFormation';
 import { ensureChannel, ensurePermissions, scheduleNightReminders } from '../services/notifications';
 import { ensureSleepHabit } from '../services/coach';
@@ -39,6 +40,13 @@ import { checkStrictPrereqs } from '../services/strictHabits';
 import { useAppStore } from '../store/useAppStore';
 import { iconForEmoji } from '../services/todos';
 import type { Medication } from '../types';
+
+/** "20h30": o horário da última chamada da corrente. */
+function chainAlertTimeText(reviewTime: string | undefined): string {
+  const m = chainAlertMinute(reviewTime);
+  const mm = m % 60;
+  return `${Math.floor(m / 60)}h${mm ? String(mm).padStart(2, '0') : ''}`;
+}
 
 /**
  * LEMBRETES (v1.130): remédios, suplementos, jejum e avisos avulsos — o que só
@@ -142,6 +150,10 @@ export function RemindersScreen() {
   const [intervalStr, setIntervalStr] = useState(String(config?.reminderIntervalMinutes ?? 10));
   // Teto de insistências por TODO não marcado (0 = não insiste).
   const [maxInsistStr, setMaxInsistStr] = useState(String(config?.nudgeMaxInsistences ?? 5));
+  const [chainAlertOn, setChainAlertOn] = useState(true);
+  useEffect(() => {
+    isChainAlertEnabled().then(setChainAlertOn).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (config) {
@@ -447,11 +459,43 @@ export function RemindersScreen() {
               try {
                 await setConfig({ reviewTime: hhmm });
                 await refreshReviewNotification();
+                await refreshChainAlert();
               } catch (err) {
                 console.warn('set review time failed:', err);
               }
             }}
           />
+        </Card>
+
+        {/* A última chamada da corrente: uma hora antes do fechamento, só com corrente em jogo. */}
+        <Card style={{ marginBottom: spacing.lg }}>
+          <Text style={styles.sectionTitle}>Corrente em risco</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Avisar quando a corrente estiver em jogo
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                Às {chainAlertTimeText(config?.reviewTime)}, uma hora antes do fechamento, se algum hábito
+                com corrente ainda não foi feito: diz o tamanho da corrente e se faltar parte a corrente ou
+                gasta um escudo. Um aviso só, e só quando há o que perder.
+              </Text>
+            </View>
+            <Switch
+              value={chainAlertOn}
+              onValueChange={async (next) => {
+                setChainAlertOn(next);
+                try {
+                  await setChainAlertEnabled(next);
+                } catch (err) {
+                  console.warn('toggle chain alert failed:', err);
+                  setChainAlertOn(!next);
+                }
+              }}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={chainAlertOn ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
         </Card>
 
         {/* "Me dê mais tempo" — minutos do snooze dos lembretes (default 20). */}

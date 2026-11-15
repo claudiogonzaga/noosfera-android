@@ -13,8 +13,8 @@
 // já não é lembrado (cobrar o registro seria trazer a muleta de volta), e no de
 // parar só o deslize registrado é falha.
 
-import type { HabitDayStatus, HabitDef, HabitStats } from '../types/habits';
-import { HEAT_CHAR, HEAT_DAYS } from '../types/habits';
+import type { HabitChain, HabitDayStatus, HabitDef, HabitStats } from '../types/habits';
+import { CHAIN_BEADS, HEAT_CHAR, HEAT_DAYS } from '../types/habits';
 import type { DayMarks } from './habitDb';
 
 export interface StrengthInput {
@@ -114,6 +114,85 @@ function valueOf(def: HabitDef, st: HabitDayStatus, value: number | undefined, f
   }
 }
 
+// ——— a corrente (ver HabitChain em types/habits.ts) ———
+
+/** O máximo de escudos guardados. */
+export const SHIELD_MAX = 2;
+
+/** Por unidade: a cada quantos elos feitos volta um escudo, e com quantos cabem dois. */
+export const CHAIN_RULES: Record<HabitChain['unit'], { earnEvery: number; capAt: number }> = {
+  dia: { earnEvery: 7, capAt: 7 },
+  semana: { earnEvery: 4, capAt: 1 },
+};
+
+/** Marcos da corrente (o próximo aparece à frente da linha). */
+export const CHAIN_MILESTONES: Record<HabitChain['unit'], number[]> = {
+  dia: MILESTONES,
+  semana: [4, 8, 12, 26, 52],
+};
+
+export interface ChainEvent {
+  /** O dia (ou a segunda-feira da semana). */
+  day: string;
+  k: 'feito' | 'falta' | 'folga' | 'pendente';
+}
+
+/**
+ * A corrente a partir dos elos em ordem. Feito soma um elo (e, a cada
+ * `earnEvery`, devolve um escudo); folga e pendente não mexem; falta gasta um
+ * escudo ou, sem escudo, parte a corrente inteira — e a corrente nova começa
+ * com 1 escudo. Falta sem corrente nenhuma não gasta escudo (não há o que
+ * proteger).
+ */
+export function chainOf(events: ChainEvent[], unit: HabitChain['unit']): HabitChain {
+  const { earnEvery, capAt } = CHAIN_RULES[unit];
+  const capFor = (n: number) => (n >= capAt ? SHIELD_MAX : 1);
+  let length = 0;
+  let best = 0;
+  let shields = 1;
+  let lost: HabitChain['lost'] = null;
+  const beads: string[] = [];
+  for (const ev of events) {
+    if (ev.k === 'pendente') beads.push('H');
+    else if (ev.k === 'folga') beads.push('O');
+    else if (ev.k === 'feito') {
+      length += 1;
+      if (length % earnEvery === 0) shields = Math.min(capFor(length), shields + 1);
+      best = Math.max(best, length);
+      beads.push('F');
+    } else if (length === 0) {
+      beads.push('N');
+    } else if (shields > 0) {
+      shields -= 1;
+      beads.push('E');
+    } else {
+      lost = { n: length, day: ev.day };
+      length = 0;
+      shields = 1;
+      beads.push('Q');
+    }
+  }
+  const cap = capFor(length);
+  shields = Math.min(shields, cap);
+  const last = beads[beads.length - 1];
+  return {
+    unit,
+    length,
+    best,
+    shields,
+    cap,
+    nextShieldIn: shields >= cap ? null : earnEvery - (length % earnEvery),
+    lost,
+    beads: beads.slice(-CHAIN_BEADS).join(''),
+    atRisk: last === 'H' && length > 0 && shields === 0,
+  };
+}
+
+/** O próximo marco da corrente (null depois do último). */
+export function nextChainMilestone(chain: Pick<HabitChain, 'unit' | 'length'>): number | null {
+  return CHAIN_MILESTONES[chain.unit].find((m) => m > chain.length) ?? null;
+}
+
 export interface ComputedStats extends Omit<HabitStats, 'stage' | 'srbaiDue'> {
   /** Dias desde o primeiro dia do hábito. */
   ageDays: number;
@@ -187,12 +266,12 @@ export function computeStats(input: StrengthInput): ComputedStats {
   }
   if (weekly) total30 = Math.max(done30, Math.round((perWeek * counted30) / 7));
 
-  // ——— sequência "nunca falhe duas vezes" ———
-  let streak = 0;
-  let best = 0;
+  // ——— a corrente, com os escudos ———
+  const events: ChainEvent[] = [];
   if (weekly) {
-    // Por semana (seg–dom): semana com a cota cumprida soma os feitos; duas
-    // semanas seguidas sem a cota zeram. A semana corrente só soma.
+    // O elo é a semana (seg–dom): cota cumprida é elo feito; semana passada sem
+    // a cota é falta. A semana corrente vira elo quando a cota fecha; antes
+    // disso fica pendente (ainda dá tempo).
     const curWeek = weekStartOf(today);
     const byWeek = new Map<string, { done: number; counted: number }>();
     for (const x of statuses) {
@@ -202,38 +281,19 @@ export function computeStats(input: StrengthInput): ComputedStats {
       if (x.st !== 'fora' && x.st !== 'folga') e.counted += 1;
       byWeek.set(w, e);
     }
-    let prevMiss = false;
     for (const [w, e] of Array.from(byWeek.entries()).sort(([a], [b]) => a.localeCompare(b))) {
-      if (w === curWeek) {
-        streak += e.done;
-      } else if (e.counted === 0) {
-        continue; // semana toda pausada/folga
-      } else if (e.done >= Math.min(perWeek, e.counted)) {
-        streak += e.done;
-        prevMiss = false;
-      } else if (prevMiss) {
-        streak = 0;
-      } else {
-        prevMiss = true;
-        streak += e.done;
-      }
-      best = Math.max(best, streak);
+      if (e.counted === 0) continue; // semana toda pausada/folga
+      if (w === curWeek) events.push({ day: w, k: e.done >= perWeek ? 'feito' : 'pendente' });
+      else events.push({ day: w, k: e.done >= Math.min(perWeek, e.counted) ? 'feito' : 'falta' });
     }
   } else {
-    let prevMiss = false;
     for (const x of statuses) {
-      if (x.v === null) continue;
-      if (x.v >= 0.5) {
-        streak += 1;
-        prevMiss = false;
-      } else if (prevMiss) {
-        streak = 0;
-      } else {
-        prevMiss = true;
-      }
-      best = Math.max(best, streak);
+      if (x.st === 'pendente') events.push({ day: x.day, k: 'pendente' });
+      else if (x.st === 'folga') events.push({ day: x.day, k: 'folga' });
+      else if (x.v !== null) events.push({ day: x.day, k: x.v >= 0.5 ? 'feito' : 'falta' });
     }
   }
+  const chain = chainOf(events, weekly ? 'semana' : 'dia');
 
   const total = statuses.filter((x) => x.st === 'feito' || x.st === 'minimo').length;
 
@@ -273,8 +333,9 @@ export function computeStats(input: StrengthInput): ComputedStats {
     strength: Math.max(0, Math.min(1, s)),
     formed,
     last30: { done: done30, total: total30 },
-    streak,
-    best,
+    streak: chain.length,
+    best: chain.best,
+    chain,
     total,
     heat: heat.join('').slice(-HEAT_DAYS).padStart(HEAT_DAYS, HEAT_CHAR.fora),
     series: series.slice(-HEAT_DAYS),

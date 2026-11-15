@@ -42,6 +42,7 @@ import {
   type StrictHabitItem,
 } from './strictHabits';
 import { refreshReviewNotification } from './review';
+import { refreshChainAlert } from './chainAlert';
 import { getRegressionNote } from './habitFormation';
 import { getPastSelfQuotesText } from './morning';
 import { getOwlSpecies } from '../constants/owlSpecies';
@@ -1018,6 +1019,8 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
 
   // "Fechar o dia": só existe se sobrou item sem resposta.
   await refreshReviewNotification();
+  // A última chamada da corrente: só existe se há corrente em jogo hoje.
+  await refreshChainAlert();
 
   // Arma sem esperar a rede (a voz do Gemini vem depois). Com await, para quem
   // espera esta passada (settleNudgeScheduling) cancelar a voz já com tudo armado.
@@ -1103,6 +1106,7 @@ export async function confirmNudge(
   void recordHabitEvent(nudgeType, 'done', opts.minimum ? { ...meta, technique: meta.technique ?? 'minimo' } : meta, scheduledHHMM);
   void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
   void refreshReviewNotification();
+  void refreshChainAlert();
   await closeNudgeChain(nudgeType, today, scheduledHHMM);
 }
 
@@ -1127,6 +1131,7 @@ export async function skipNudgeToday(nudgeType: string, meta: ConfirmMeta = {}):
   void recordHabitEvent(nudgeType, 'not_done', meta, scheduledHHMM);
   void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
   void refreshReviewNotification();
+  void refreshChainAlert();
   await closeNudgeChain(nudgeType, today, scheduledHHMM);
 }
 
@@ -1150,6 +1155,7 @@ export async function restNudgeToday(nudgeType: string, meta: ConfirmMeta = {}):
   void recordHabitEvent(nudgeType, 'rest', meta, scheduledHHMM);
   void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
   void refreshReviewNotification();
+  void refreshChainAlert();
   await closeNudgeChain(nudgeType, today, scheduledHHMM);
 }
 

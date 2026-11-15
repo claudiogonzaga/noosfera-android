@@ -10,7 +10,10 @@
 //    ainda está se formando;
 //  - recompensa leve: vibração, um pulo no ✓, a coruja feliz no dia perfeito,
 //    os marcos — nada de pontos;
-//  - nenhum texto culpa. Falhou? "Voltou!" vale mais que a sequência.
+//  - nenhum texto culpa. Falhou? "Voltou!" vale mais que a sequência;
+//  - a CORRENTE à vista (v1.132): os últimos elos, o tamanho e os escudos em
+//    cada hábito de fazer — saber o que se perde é o que faz proteger. Uma
+//    falta gasta um escudo; sem escudo, a corrente se parte.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -25,6 +28,7 @@ import { SrbaiSheet } from './SrbaiSheet';
 import { SlipSheet } from './SlipSheet';
 import { HabitCelebration, milestoneText } from './HabitCelebration';
 import { StrengthRing, withAlpha } from './habitShared';
+import { ChainStrip, chainA11y, chainDoneToday } from './HabitChain';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   clearHabitDay,
@@ -186,7 +190,13 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
 
   const patchToday = (type: string, today: HabitDayStatus) =>
     setItems((prev) =>
-      prev ? prev.map((i) => (i.habit.type === type ? { ...i, stats: { ...i.stats, today } } : i)) : prev,
+      prev
+        ? prev.map((i) =>
+            i.habit.type === type
+              ? { ...i, stats: { ...i.stats, today, chain: isDone(today) ? chainDoneToday(i.stats.chain) : i.stats.chain } }
+              : i,
+          )
+        : prev,
     );
 
   const onTap = async (it: TodayHabit) => {
@@ -754,7 +764,7 @@ function HabitRow({
         delayLongPress={350}
         style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
         accessibilityRole="button"
-        accessibilityLabel={`${habit.title}, ${stateLabel}, força ${Math.round(stats.strength * 100)}%`}
+        accessibilityLabel={`${habit.title}, ${stateLabel}, ${parar ? `força ${Math.round(stats.strength * 100)}%` : chainA11y(stats.chain)}`}
         accessibilityHint={
           done ? 'Toque para desmarcar. Toque longo para mais opções.' : 'Toque para marcar. Toque longo para mais opções.'
         }
@@ -771,8 +781,10 @@ function HabitRow({
               {meta}
             </Text>
           ) : null}
+          {/* a corrente: o que se perde se hoje falhar */}
+          {!parar && <ChainStrip chain={stats.chain} />}
         </View>
-        <StrengthRing value={stats.strength} size={34} />
+        {parar && <StrengthRing value={stats.strength} size={34} />}
         <Animated.View style={[styles.state, { transform: [{ scale }] }]}>
           <StateMark item={item} />
         </Animated.View>

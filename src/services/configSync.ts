@@ -338,6 +338,15 @@ async function collect(
           last30: [st.last30.done, st.last30.total],
           streak: st.streak,
           best: st.best,
+          // A corrente com os escudos (o Mac desenha a linha de elos).
+          chain: {
+            unit: st.chain.unit,
+            shields: st.chain.shields,
+            cap: st.chain.cap,
+            next: st.chain.nextShieldIn,
+            lost: st.chain.lost,
+            beads: st.chain.beads,
+          },
           total: st.total,
           heat: st.heat,
           srbai: st.srbai,

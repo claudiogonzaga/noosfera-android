@@ -1,6 +1,7 @@
 // "SEUS HÁBITOS": a lista inteira, em quatro gavetas — em formação, formados,
-// pausados, arquivados. Cada linha mostra a força, a fase e as duas últimas
-// semanas em quadradinhos: dá para ver de relance o que está pegando e o que
+// pausados, arquivados. Cada linha mostra a força, a fase e a corrente (os
+// últimos elos, o tamanho e os escudos; nos hábitos de parar, as duas últimas
+// semanas em quadradinhos): dá para ver de relance o que está pegando e o que
 // está emperrado, sem abrir nada.
 //
 // Daqui também sai o modo férias ("Pausar todos"), porque a pausa protege a
@@ -15,6 +16,7 @@ import { Card } from '../components/Card';
 import { HabitIcon } from '../components/HabitIcon';
 import { PauseSheet, PAUSE_NO_DATE } from '../components/PauseSheet';
 import { MiniHeat, STAGE_LABEL, ScreenHeader, StrengthRing, dayLabel, addDays } from '../components/habitShared';
+import { ChainStrip } from '../components/HabitChain';
 import { colors, spacing, typography } from '../theme';
 import { getAllHabitStats, listHabits, pauseAllHabits } from '../services/habitos';
 import type { HabitDef, HabitStats } from '../types/habits';
@@ -118,9 +120,13 @@ export function HabitsScreen() {
             {sub}
           </Text>
           {s && !h.archived ? (
-            <View style={{ marginTop: 6 }}>
-              <MiniHeat heat={s.heat} days={14} />
-            </View>
+            h.kind === 'parar' ? (
+              <View style={{ marginTop: 6 }}>
+                <MiniHeat heat={s.heat} days={14} />
+              </View>
+            ) : (
+              <ChainStrip chain={s.chain} count={12} />
+            )
           ) : null}
         </View>
         {s && !h.archived ? <StrengthRing value={s.strength} size={40} /> : null}

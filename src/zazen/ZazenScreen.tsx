@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useKinesis } from '../kinesis/store';
@@ -44,6 +45,17 @@ export function ZazenScreen() {
     : gasshoAte > agora
       ? 'gassho'
       : 'parado';
+
+  // Com o Zazen à vista, a tela não esmaece nem apaga: o ensō e o tempo ficam
+  // visíveis a sessão inteira. Saindo da aba, o telefone volta ao normal.
+  useEffect(() => {
+    if (!focused) return;
+    const tag = 'zazen-tela';
+    void activateKeepAwakeAsync(tag).catch(() => {});
+    return () => {
+      void deactivateKeepAwake(tag).catch(() => {});
+    };
+  }, [focused]);
 
   // O relógio da tela: só bate com a aba à vista e algo acontecendo. Na
   // preparação, 4 vezes por segundo (a contagem é curta); sentado, uma.
@@ -241,7 +253,7 @@ export function ZazenScreen() {
   );
 }
 
-/** 合掌: as mãos juntas, ao fim. Surge devagar dentro do ensō fechado. */
+/** Gasshō (as mãos juntas), ao fim. Surge devagar dentro do ensō fechado. */
 function Gassho() {
   const surgir = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -249,8 +261,7 @@ function Gassho() {
   }, [surgir]);
   return (
     <Animated.View style={[styles.tempo, { opacity: surgir }]}>
-      <Text allowFontScaling={false} style={styles.gassho}>合掌</Text>
-      <Text allowFontScaling={false} style={styles.gasshoLatim}>gasshō</Text>
+      <Text allowFontScaling={false} style={styles.gassho}>gasshō</Text>
     </Animated.View>
   );
 }
@@ -321,7 +332,6 @@ const styles = StyleSheet.create({
   ajuste: { fontFamily: SERIFA, fontSize: 26, color: P.lavado, paddingHorizontal: 6 },
   preparo: { fontFamily: SERIFA, fontWeight: '300', fontSize: 26, color: P.lavado },
   gassho: { fontFamily: SERIFA, fontSize: 30, lineHeight: 38, color: P.tinta, opacity: 0.86, letterSpacing: 4 },
-  gasshoLatim: { fontFamily: SERIFA, fontStyle: 'italic', fontSize: 12, letterSpacing: 2, color: P.lavado, marginTop: 4 },
   controles: { alignItems: 'center', marginTop: 22, paddingHorizontal: 20 },
   grupo: { alignItems: 'center', marginTop: 16 },
   rotulo: { fontFamily: SERIFA, fontSize: 10.5, letterSpacing: 2.5, color: P.lavado, marginBottom: 5 },

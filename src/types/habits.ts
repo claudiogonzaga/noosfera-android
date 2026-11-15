@@ -84,6 +84,39 @@ export const HEAT_CHAR: Record<HabitDayStatus, string> = {
 
 export const HEAT_DAYS = 120;
 
+/**
+ * A CORRENTE (v1.132, pedido de 14/11/2026): os dias feitos em fila, como no
+ * Duolingo. Uma falta sem escudo parte a corrente inteira; o ESCUDO segura uma
+ * falta. A corrente nova começa com 1 escudo (a primeira semana já tem
+ * proteção); ao chegar a 7 dias cabem 2; e a cada 7 dias feitos volta um.
+ * No hábito de "X vezes por semana" o elo é a semana (cota cumprida): cabem 2
+ * a partir da segunda semana e volta um a cada 4 semanas cumpridas.
+ *
+ * `beads`: um caractere por elo, o último é o mais recente —
+ * F feito · E escudo usado (a falta foi segurada) · Q quebra (a falta sem escudo
+ * partiu a corrente) · N falta sem corrente para perder · O folga (neutro) ·
+ * H hoje (ou esta semana) ainda pendente.
+ */
+export interface HabitChain {
+  unit: 'dia' | 'semana';
+  /** Elos feitos na corrente atual. */
+  length: number;
+  best: number;
+  /** Escudos guardados agora (0..cap). */
+  shields: number;
+  /** Quantos escudos cabem agora: 1 na primeira semana da corrente, 2 depois. */
+  cap: number;
+  /** Feitos que faltam para o próximo escudo; null com os escudos cheios. */
+  nextShieldIn: number | null;
+  /** A última quebra: o tamanho da corrente perdida e o dia da falta. */
+  lost: { n: number; day: string } | null;
+  beads: string;
+  /** Hoje pendente, com corrente e sem escudo: faltar hoje parte a corrente. */
+  atRisk: boolean;
+}
+
+export const CHAIN_BEADS = 21;
+
 export interface HabitDef {
   id: number;
   /** Chave estável (nudge_completions, sincronização, eventos). */
@@ -147,9 +180,12 @@ export interface HabitStats {
   formed: boolean;
   /** Nos últimos 30 dias (sem hoje, se pendente): dias feitos / dias que contavam. */
   last30: { done: number; total: number };
-  /** Dias feitos na sequência atual sem DUAS faltas seguidas ("nunca falhe duas vezes"). */
+  /** O tamanho da corrente atual (= chain.length; em semanas no hábito semanal). */
   streak: number;
+  /** A maior corrente já feita (= chain.best). */
   best: number;
+  /** A corrente com os escudos (ver HabitChain). */
+  chain: HabitChain;
   /** Total de dias feitos desde sempre (os marcos: 7, 21, 30, 66, 100, 200, 365). */
   total: number;
   /** HEAT_DAYS caracteres (ver HEAT_CHAR); o último é hoje. */

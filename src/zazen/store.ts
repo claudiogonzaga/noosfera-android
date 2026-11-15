@@ -33,7 +33,7 @@ const KEYS = {
   dias: 'zazen:dias',
 } as const;
 
-/** Quanto tempo o "合掌 · gasshō" fica na tela depois do último sino. */
+/** Quanto tempo o "gasshō" fica na tela depois do último sino. */
 const GASSHO_MS = 7000;
 /** Abrindo o app logo depois do fim (pela notificação), ainda vale o gasshō. */
 const GASSHO_JANELA_MS = 60_000;
@@ -87,7 +87,7 @@ interface ZazenStore {
   sessao: ZazenSessao | null;
   /** Minutos sentados por dia (YYYY-MM-DD local). */
   dias: Record<string, number>;
-  /** Até quando o "合掌 · gasshō" fica na tela (epoch ms); 0 = não está. */
+  /** Até quando o "gasshō" fica na tela (epoch ms); 0 = não está. */
   gasshoAte: number;
 
   load(): Promise<void>;

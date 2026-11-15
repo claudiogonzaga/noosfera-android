@@ -1,9 +1,10 @@
 // O DETALHE de um hábito: tudo o que ajuda a entender como ele está indo.
 //
-// A medida principal é a FORÇA (0–100%, à moda do Loop Habit Tracker): sobe com
-// cada repetição e desce devagar com as faltas — uma falta não zera nada, ao
-// contrário da sequência clássica, que pune o dia ruim e faz largar tudo. A
-// sequência aparece, mas na versão tolerante ("sem falhar duas vezes"). O mapa
+// No topo, a CORRENTE (v1.132): os dias feitos em fila, com os escudos que
+// seguram uma falta; sem escudo, a falta parte a corrente inteira — é o que dá
+// vontade de protegê-la. Logo abaixo, a FORÇA (0–100%, à moda do Loop Habit
+// Tracker), que sobe com cada repetição e desce devagar com as faltas: a
+// corrente pode quebrar, a força não zera. O mapa
 // de calor mostra o padrão (e deixa corrigir um dia esquecido); a
 // automaticidade diz se já sai sem pensar; os motivos e, nos hábitos de parar,
 // os gatilhos mostram onde o plano precisa de ajuste.
@@ -20,6 +21,7 @@ import { SrbaiSheet } from '../components/SrbaiSheet';
 import { PauseSheet, PAUSE_NO_DATE } from '../components/PauseSheet';
 import { HabitHeatmap, StrengthChart, TriggerBars } from '../components/HabitCharts';
 import { HabitCelebration, milestoneText } from '../components/HabitCelebration';
+import { ChainCard } from '../components/HabitChain';
 import {
   STAGE_LABEL,
   ScreenHeader,
@@ -215,8 +217,17 @@ export function HabitDetailScreen() {
         {/* ——— força ——— */}
         {stats ? (
           <>
+            {/* ——— a corrente ——— */}
+            {!parar && (
+              <Card style={styles.card}>
+                <Text style={styles.cardTitle}>A corrente</Text>
+                <View style={{ height: spacing.sm }} />
+                <ChainCard chain={stats.chain} />
+              </Card>
+            )}
+
             <View style={styles.ringWrap}>
-              <StrengthRing value={stats.strength} size={150} stroke={12} labelSize={40} />
+              <StrengthRing value={stats.strength} size={parar ? 150 : 120} stroke={parar ? 12 : 10} labelSize={parar ? 40 : 32} />
               <Text style={styles.ringLabel}>força do hábito</Text>
             </View>
 
@@ -225,10 +236,8 @@ export function HabitDetailScreen() {
                 big={`${stats.last30.done} de ${stats.last30.total}`}
                 small="nos últimos 30 dias"
               />
-              {parar ? (
+              {parar && (
                 <Block big={`${stats.cleanDays ?? 0}`} small={(stats.cleanDays ?? 0) === 1 ? 'dia limpo' : 'dias limpos'} />
-              ) : (
-                <Block big={`${stats.streak}`} small={`sequência sem falhar duas vezes (melhor: ${stats.best})`} />
               )}
               <Block big={`${stats.total}`} small={stats.total === 1 ? 'dia feito no total' : 'dias feitos no total'} />
             </View>

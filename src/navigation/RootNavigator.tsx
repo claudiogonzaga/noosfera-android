@@ -53,6 +53,7 @@ import {
 import { confirmNudge, skipNudgeToday, snoozeNudge } from '../services/nudges';
 import { handleMorningResponse, MORNING_TYPE } from '../services/morning';
 import { REVIEW_TYPE } from '../services/review';
+import { CHAIN_ALERT_TYPE } from '../services/chainAlert';
 import { markSlipFromNotification } from '../services/habitos';
 import { rateAudioClip, rateInspirationCard } from '../services/inspiration';
 import { ReviewScreen } from '../screens/ReviewScreen';
@@ -367,6 +368,9 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
         nav.navigate('Main', { screen: 'Home' });
       } else if (type === REVIEW_TYPE) {
         nav.navigate('Review');
+      } else if (type === CHAIN_ALERT_TYPE) {
+        // A última chamada da corrente: a Home, onde um toque fecha o elo de hoje.
+        nav.navigate('Main', { screen: 'Home' });
       }
     };
 

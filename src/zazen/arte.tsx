@@ -16,7 +16,7 @@ export interface Paleta {
   /** O cinza do lavado: textos secundários e controles não escolhidos. */
   lavado: string;
   selo: string;
-  /** O ideograma do selo: o papel aparecendo onde a pedra foi entalhada. */
+  /** O entalhe do selo (o ensō): o papel aparecendo onde a pedra foi cavada. */
   seloTexto: string;
   /** As fibras mais claras que o papel (no papel escuro, mais escuras). */
   fibraClara: string;
@@ -92,8 +92,9 @@ export const Washi = memo(function Washi({ width, height, p = PALETA }: { width:
   );
 });
 
-/** O selo hanko: quadrado vermelho de borda gasta, com 坐 entalhado. */
-export const Hanko = memo(function Hanko({ size, p = PALETA, char = '坐' }: { size: number; p?: Paleta; char?: string }) {
+/** O selo hanko: quadrado vermelho de borda gasta, com um ensō (o círculo de um só
+ *  traço, aberto no alto) entalhado — sem ideograma, que ninguém precisa decifrar. */
+export const Hanko = memo(function Hanko({ size, p = PALETA }: { size: number; p?: Paleta }) {
   const quadrado = useMemo(() => quadradoDoSelo(size), [size]);
   const falhas = useMemo(() => falhasDoSelo(size), [size]);
   return (
@@ -104,25 +105,19 @@ export const Hanko = memo(function Hanko({ size, p = PALETA, char = '坐' }: { s
           <Circle key={i} cx={c.cx} cy={c.cy} r={c.r} fill={p.papel} opacity={0.55} />
         ))}
       </Svg>
-      <View style={[StyleSheet.absoluteFill, styles.centro]}>
-        <Text
-          allowFontScaling={false}
-          style={{ color: p.seloTexto, fontFamily: SERIFA, fontSize: size * 0.58, lineHeight: size * 0.74, includeFontPadding: false }}
-        >
-          {char}
-        </Text>
-      </View>
+      <Svg width={size} height={size} viewBox="0 0 60 60" style={StyleSheet.absoluteFill}>
+        <Path d="M38.4 20.0 A13 13 0 1 1 32.3 17.2" fill="none" stroke={p.seloTexto} strokeWidth={4.4} strokeLinecap="round" />
+        <Path d="M32.3 17.2 Q30.6 16.9 29.2 17.0" fill="none" stroke={p.seloTexto} strokeWidth={2.2} strokeLinecap="round" />
+      </Svg>
     </View>
   );
 });
 
-/** A inscrição do canto: 坐禅 na vertical, como caligrafia, e "zazen" miúdo. */
+/** A inscrição do canto: só a palavra "zazen", como a assinatura de uma pintura. */
 export function Inscricao({ p = PALETA }: { p?: Paleta }) {
   return (
     <View style={styles.inscricao} accessible accessibilityLabel="Zazen">
-      <Text allowFontScaling={false} style={[styles.kanji, { color: p.tinta }]}>坐</Text>
-      <Text allowFontScaling={false} style={[styles.kanji, { color: p.tinta }]}>禅</Text>
-      <Text allowFontScaling={false} style={[styles.latim, { color: p.lavado }]}>zazen</Text>
+      <Text allowFontScaling={false} style={[styles.latim, { color: p.tinta }]}>zazen</Text>
     </View>
   );
 }
@@ -149,8 +144,6 @@ export function SengaiIcon({ height, color }: { height: number; color: string })
 }
 
 const styles = StyleSheet.create({
-  centro: { alignItems: 'center', justifyContent: 'center' },
   inscricao: { alignItems: 'center' },
-  kanji: { fontFamily: SERIFA, fontSize: 21, lineHeight: 25, opacity: 0.88 },
-  latim: { fontFamily: SERIFA, fontStyle: 'italic', fontSize: 11, letterSpacing: 1.5, marginTop: 6 },
+  latim: { fontFamily: SERIFA, fontStyle: 'italic', fontSize: 17, letterSpacing: 3, opacity: 0.82 },
 });

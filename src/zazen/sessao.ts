@@ -141,7 +141,7 @@ export function minutosSentados(s: ZazenSessao, agora: number): number {
   return Math.floor((agora - s.inicioEm) / 60_000);
 }
 
-const TITULO = '坐禅 · Zazen';
+const TITULO = 'Zazen';
 
 function notifPreparo(s: ZazenSessao): KinesisNotif {
   return { title: 'Zazen · preparando', text: 'o primeiro sino marca o início', chronoTo: s.inicioEm, chronoDown: true };
@@ -173,7 +173,7 @@ export function linhaDoTempo(s: ZazenSessao, agora: number): ZazenTimeline {
     at: s.fimEm,
     sound: SOM.hozen,
     finish: true,
-    notif: { title: TITULO, text: '合掌 · gasshō', chronoTo: 0, chronoDown: true },
+    notif: { title: TITULO, text: 'gasshō · fim da sessão', chronoTo: 0, chronoDown: true },
   });
   return {
     link: LINK,
