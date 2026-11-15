@@ -6,6 +6,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAppStore as useRootStore } from '../../store/useAppStore';
 import { getNightGateEnabled, isSleepWindow, setNightGateEnabled } from '../bootstrap';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { BlueskyScreen } from '../screens/BlueskyScreen';
 import { FeedScreen } from '../screens/FeedScreen';
 import { NotesScreen } from '../screens/NotesScreen';
 import { XLoginScreen } from '../screens/XLoginScreen';
@@ -82,6 +83,8 @@ export function AspisNavigator() {
       }}
     >
       <Stack.Screen name="Feed" component={GatedFeed} />
+      {/* sem animação: a aba Bluesky troca no lugar, como YouTube e X */}
+      <Stack.Screen name="Bluesky" component={BlueskyScreen} options={{ animation: 'none' }} />
       <Stack.Screen name="Share" component={ShareScreen} options={{ animation: 'fade_from_bottom' }} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="PillarEdit" component={PillarEditScreen} />

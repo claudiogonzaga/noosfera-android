@@ -49,7 +49,7 @@ function sharedRecently(v: { shared_at?: string | null }): number {
 /** Quanto tempo o aviso "Ocultado · Desfazer" fica na tela. */
 const UNDO_MS = 5000;
 
-export function FeedScreen({ navigation }: Props) {
+export function FeedScreen({ navigation, route }: Props) {
   const {
     user,
     pillars,
@@ -67,6 +67,11 @@ export function FeedScreen({ navigation }: Props) {
   const [activePillar, setActivePillar] = useState<string | null>(null);
   // YouTube ou X: as duas fontes passam pelo mesmo escudo, cada uma na sua lista.
   const [source, setSource] = useState<FeedSource>('youtube');
+  // de volta da aba Bluesky: abre na aba tocada lá
+  const askedSource = route.params?.source;
+  useEffect(() => {
+    if (askedSource) setSource(askedSource);
+  }, [askedSource, route.params]);
   const xConnected = useXStore((s) => s.connected);
   useEffect(() => {
     useXStore.getState().load();
@@ -275,6 +280,15 @@ export function FeedScreen({ navigation }: Props) {
             </Text>
           </Pressable>
         ))}
+        {/* o Bluesky vem pronto do Mac: tela própria (screens/BlueskyScreen) */}
+        <Pressable
+          onPress={() => navigation.navigate('Bluesky')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: false }}
+          style={styles.sourceTab}
+        >
+          <Text style={styles.sourceText}>Bluesky</Text>
+        </Pressable>
       </View>
 
       <View style={styles.metaRow}>
