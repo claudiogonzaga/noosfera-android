@@ -205,6 +205,23 @@ class AspisMediaModule : Module() {
       else ctx.startActivity(chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    // ATUALIZAÇÃO DO APP pela vitrine (ver AppUpdate.kt): baixa e confere o
+    // SHA-256 numa thread à parte; depois o instalador do Android pede um toque.
+    AsyncFunction("downloadAppUpdate") { url: String, sha256: String, promise: Promise ->
+      val ctx = context
+      executor.execute {
+        try {
+          promise.resolve(AppUpdate.download(ctx, url, sha256))
+        } catch (e: Exception) {
+          promise.reject("E_UPDATE", e.message ?: "A atualização falhou.", e)
+        }
+      }
+    }
+    Function("appUpdateReady") { sha256: String -> AppUpdate.ready(context, sha256) }
+    Function("canInstallUpdates") { AppUpdate.canInstall(context) }
+    Function("openInstallPermission") { AppUpdate.openInstallPermission(context) }
+    Function("installAppUpdate") { path: String -> AppUpdate.install(context, path) }
+
     // Wi-Fi (ou outra rede sem cobrança por dados) — o pré-download só roda
     // nela por padrão, para não gastar a franquia do celular.
     Function("isUnmeteredNetwork") {
