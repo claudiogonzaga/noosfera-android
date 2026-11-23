@@ -28,7 +28,7 @@ import { wipeAspisData } from '../aspis/bootstrap';
 import { deleteClaudeKey } from '../services/claude';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 import { DeckPickerCard } from '../components/DeckPickerCard';
-import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
+import { checkForUpdate, downloadAndInstall, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
 import { confirmAndRestoreBackup, deleteLocalDataCopies, exportBackup } from '../services/backup';
 import {
   cancelAllSpoken,
@@ -112,7 +112,7 @@ export function SettingsScreen() {
       const info = await checkForUpdate(true);
       setUpdateInfo(info);
       if (!info.latestVersion) {
-        Alert.alert('Sem atualizações', 'Não consegui acessar o GitHub Releases agora. Tente de novo daqui a pouco.');
+        Alert.alert('Sem atualizações', 'Não consegui acessar a página de versões agora. Tente de novo daqui a pouco.');
       } else if (!info.available) {
         Alert.alert('Você está na última versão!', `v${info.currentVersion} é a mais recente.`);
       }
@@ -121,10 +121,21 @@ export function SettingsScreen() {
     }
   };
 
-  const downloadUpdate = () => {
-    const url = updateInfo?.downloadUrl ?? updateInfo?.releaseUrl;
-    if (!url) return;
-    Linking.openURL(url);
+  // Baixa pela vitrine, confere o SHA-256 e abre o instalador do Android. Sem o
+  // hash publicado (não deveria acontecer), cai para a página de versões.
+  const [installing, setInstalling] = useState(false);
+  const downloadUpdate = async () => {
+    if (!updateInfo) return;
+    if (!updateInfo.downloadUrl || !updateInfo.sha256) {
+      if (updateInfo.releaseUrl) Linking.openURL(updateInfo.releaseUrl);
+      return;
+    }
+    setInstalling(true);
+    try {
+      await downloadAndInstall(updateInfo);
+    } finally {
+      setInstalling(false);
+    }
   };
 
   const handleResetAllData = () => {
@@ -374,8 +385,9 @@ export function SettingsScreen() {
               ) : null}
               <View style={{ height: spacing.sm }} />
               <Button
-                label={updateInfo.downloadUrl ? 'Baixar APK' : 'Abrir release no GitHub'}
-                onPress={downloadUpdate}
+                label={installing ? 'Baixando e conferindo…' : updateInfo.downloadUrl ? 'Baixar e instalar' : 'Abrir a página de versões'}
+                onPress={() => void downloadUpdate()}
+                disabled={installing}
               />
             </View>
           ) : (

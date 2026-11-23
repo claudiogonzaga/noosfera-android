@@ -27,6 +27,12 @@ interface AspisMediaNative {
   updateEngine(): Promise<{ status: string; version: string | null }>;
   engineVersion(): string | null;
   isUnmeteredNetwork(): boolean;
+  // Atualização do app pela vitrine (consciencia.eco.br/noosfera): baixa conferindo o SHA-256.
+  downloadAppUpdate(url: string, sha256: string): Promise<string>;
+  appUpdateReady(sha256: string): string | null;
+  canInstallUpdates(): boolean;
+  openInstallPermission(): void;
+  installAppUpdate(path: string): void;
   shareFile(uri: string, mime: string, text: string, title: string): void;
 
   // Transcrição no celular (Parakeet via sherpa-onnx)
