@@ -34,6 +34,12 @@ class ReadAloudJob(
   val workDir: String,
   val tag: String,
   val title: String,
+  /** Guarda os trechos prontos depois de montar o áudio (texto vinculado a um Google Docs). */
+  val keepChunks: Boolean = false,
+  /** Gera tudo de novo: os trechos guardados deste texto são apagados antes. */
+  val fresh: Boolean = false,
+  /** Trechos de uma versão anterior do texto que não servem mais. */
+  val dropChunks: List<String> = emptyList(),
 ) {
   @Volatile var canceled = false
   @Volatile var conn: HttpURLConnection? = null
@@ -199,10 +205,12 @@ class ReadAloudService : Service() {
     try {
       val dir = File(job.workDir).apply { mkdirs() }
       val files = ArrayList<File>(total)
+      fun chunkFile(text: String) = File(dir, "rachunk_" + sha("${job.model}|${job.voice}:chunk:$text") + ".pcm")
+      if (job.fresh) job.chunks.forEach { runCatching { chunkFile(it).delete() } }
       for ((i, text) in job.chunks.withIndex()) {
         if (job.canceled) throw TtsCanceled()
         report(job, "running", i, total)
-        val f = File(dir, "rachunk_" + sha("${job.model}|${job.voice}:chunk:$text") + ".pcm")
+        val f = chunkFile(text)
         files += f
         if (f.exists() && f.length() > 0 && f.length() % 2 == 0L) continue
         val pcm = engine.synth(text)
@@ -215,7 +223,11 @@ class ReadAloudService : Service() {
       }
       report(job, "running", total, total)
       WavFiles.concat(files, File(job.outPath), raw = true)
-      files.forEach { runCatching { it.delete() } }
+      if (!job.keepChunks) files.forEach { runCatching { it.delete() } }
+      if (job.dropChunks.isNotEmpty()) {
+        val keep = files.map { it.path }.toSet()
+        job.dropChunks.map { chunkFile(it) }.filter { it.path !in keep }.forEach { runCatching { it.delete() } }
+      }
       val uri = "file://" + job.outPath
       JobStore.put(this, job.id, mapOf("state" to "done", "done" to total, "total" to total, "uri" to uri, "error" to null))
       emit(job, "done", total, total, uri, null, false)

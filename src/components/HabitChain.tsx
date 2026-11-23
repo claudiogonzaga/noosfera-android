@@ -127,6 +127,8 @@ export function ChainLine({
   height = 20,
   ghost = 0,
   fill = false,
+  contas = false,
+  ink: inkProp,
 }: {
   chain: HabitChain;
   count?: number;
@@ -137,18 +139,23 @@ export function ChainLine({
   ghost?: number;
   /** Ocupa a largura disponível. */
   fill?: boolean;
+  /** As contas no fio (painel Hoje): fio mais grosso e a quebra como conta vazia e tracejada. */
+  contas?: boolean;
+  /** Cor do feito e do fio (padrão: o destaque do tema). */
+  ink?: string;
 }) {
   const [measured, setMeasured] = useState(0);
   const beads = chain.beads.slice(-count).split('');
   const n = beads.length + ghost;
   const pad = r * 1.6 + 1.5;
-  const gap = fill ? (measured > 0 && n > 1 ? Math.min(34, (measured - 2 * pad) / (n - 1)) : 0) : step;
+  const gap = fill ? (measured > 0 && n > 1 ? Math.min(contas ? 64 : 34, (measured - 2 * pad) / (n - 1)) : 0) : step;
   const width = fill ? measured : pad * 2 + gap * Math.max(0, n - 1);
   const x = (i: number) => pad + i * gap;
   const y = height / 2;
   const lastQ = beads.lastIndexOf('Q');
 
-  const ink = colors.accent.gold;
+  const ink = inkProp ?? colors.accent.gold;
+  const fio = contas ? 2.4 : 1.6;
   const shield = SHIELD_COLOR;
   const danger = colors.accent.danger;
   const faint = colors.text.tertiary;
@@ -165,7 +172,7 @@ export function ChainLine({
           if (c === 'Q') {
             // a corrente se parte: meia ligação vermelha que não chega
             return (
-              <Line key={`l${i}`} x1={x(i - 1)} y1={y} x2={(x(i - 1) + x(i)) / 2} y2={y} stroke={danger} strokeWidth={1.6} opacity={0.7} />
+              <Line key={`l${i}`} x1={x(i - 1)} y1={y} x2={(x(i - 1) + x(i)) / 2} y2={y} stroke={danger} strokeWidth={fio} opacity={0.7} />
             );
           }
           const lost = i < lastQ;
@@ -177,7 +184,7 @@ export function ChainLine({
               x2={x(i)}
               y2={y}
               stroke={ink}
-              strokeWidth={1.6}
+              strokeWidth={fio}
               strokeDasharray={c === 'H' ? '2 3' : undefined}
               opacity={lost ? 0.25 : c === 'O' || a === 'O' ? 0.55 : 1}
             />
@@ -214,6 +221,9 @@ export function ChainLine({
             case 'O':
               return <Circle key={i} cx={cx} cy={y} r={r * 0.55} fill="none" stroke={ink} strokeWidth={1.2} opacity={lost ? 0.25 : 0.6} />;
             case 'Q': {
+              if (contas) {
+                return <Circle key={i} cx={cx} cy={y} r={r - 1} fill="none" stroke={danger} strokeWidth={1.6} strokeDasharray="3 3" />;
+              }
               const k = r * 0.85;
               return (
                 <G key={i}>
@@ -243,7 +253,7 @@ export function ChainLine({
       accessibilityLabel={chainA11y(chain)}
     >
       {svg}
-      {hIndex >= 0 && width > 0 && <TodayBead cx={x(hIndex)} cy={y} r={r} color={chain.atRisk ? danger : ink} />}
+      {hIndex >= 0 && width > 0 && <TodayBead cx={x(hIndex)} cy={y} r={r} color={chain.atRisk ? danger : contas ? colors.accent.gold : ink} />}
     </View>
   );
 }

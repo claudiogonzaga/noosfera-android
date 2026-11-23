@@ -293,7 +293,19 @@ export interface ReadAloudText {
   audioUri: string | null;
   /** Voz Gemini usada no áudio guardado. */
   audioVoice: string | null;
+  /** Google Docs de onde o texto vem (null = texto colado ou importado uma vez). */
+  docId?: string | null;
+  /** Data da última alteração do documento já trazida para `content`. */
+  docModified?: string | null;
+  /** Como o áudio guardado foi gerado: serve para gerar de novo só o que mudou. */
+  docAudio?: ReadAloudDocAudio | null;
   updatedAt: string;
+}
+
+/** Os trechos do áudio guardado de um texto vinculado e o que os define (modelo, voz, pausa). */
+export interface ReadAloudDocAudio {
+  key: string;
+  chunks: string[];
 }
 
 /** Um som de respiração próprio do usuário (vários permitidos), cada um nomeado. */

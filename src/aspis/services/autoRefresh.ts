@@ -75,7 +75,7 @@ const say = (progress: string) => useRefreshStore.setState({ progress });
 /** Uma rodada do YouTube: inscrições → vídeos novos → análise → banco. */
 export function runYouTube(manual = false): Promise<RefreshResult> {
   return exclusive('youtube', manual, async () => {
-    const token = await getAccessToken();
+    const token = await getAccessToken('youtube');
     const { period, minStars } = useAppStore.getState();
     const result = await refreshFeed(token, brainOptions(), period, minStars, (p) => {
       if (p.stage === 'subs') say('Lendo as suas inscrições…');

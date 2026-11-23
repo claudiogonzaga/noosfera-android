@@ -104,6 +104,8 @@ export const MED_DO_CATEGORY = 'comentor-med-do-actions';
  * tempo, não fiz) vem meia hora depois, com as categorias completas acima.
  */
 export const NUDGE_SOFT_CATEGORY = 'comentor-nudge-soft-actions';
+/** Aviso curto na hora (v1.135): "Feito" e "Mais tarde", uma vez só. */
+export const NUDGE_NOW_CATEGORY = 'comentor-nudge-now-actions';
 export const MED_SOFT_CATEGORY = 'comentor-med-soft-actions';
 export const MED_DO_SOFT_CATEGORY = 'comentor-med-do-soft-actions';
 
@@ -220,6 +222,10 @@ export async function ensureNotificationCategories() {
   // No horário: só o botão de quem já resolveu (a pergunta vem depois).
   await Notifications.setNotificationCategoryAsync(NUDGE_SOFT_CATEGORY, [
     { identifier: NUDGE_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
+  ]);
+  await Notifications.setNotificationCategoryAsync(NUDGE_NOW_CATEGORY, [
+    { identifier: NUDGE_DONE_ACTION, buttonTitle: 'Feito ✅', options: bg },
+    { identifier: NUDGE_SNOOZE_ACTION, buttonTitle: `Mais tarde (${snoozeMin} min)`, options: bg },
   ]);
   await Notifications.setNotificationCategoryAsync(MED_SOFT_CATEGORY, [
     { identifier: MED_DONE_ACTION, buttonTitle: 'Já tomei 💊', options: bg },

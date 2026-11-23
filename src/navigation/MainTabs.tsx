@@ -5,7 +5,8 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
 
-import { GreekIcon } from '../components/GreekIcon';
+import { ATENA_MINI, Simbolo } from '../components/Simbolo';
+import { ECOLOGICO, ESPACIAL } from '../theme/tema';
 import { HomeScreen } from '../screens/HomeScreen';
 import { AspisNavigator } from '../aspis/navigation/AspisNavigator';
 import { KairosScreen } from '../kairos/KairosScreen';
@@ -108,7 +109,7 @@ const sinoStyles = StyleSheet.create({
 // (tela estreita, fonte do sistema grande), o rótulo vai para baixo do ícone.
 
 const ROTULOS: Record<keyof MainTabParamList, string> = {
-  Home: 'Comentora',
+  Home: 'Areté',
   Aspis: 'Escudo',
   Kinesis: 'Kinesis',
   Kairos: 'Kairós',
@@ -130,7 +131,7 @@ function larguraRotulo(texto: string, escalaFonte: number, fonte = FONTE_ROTULO)
 }
 
 /**
- * Os cinco espaços da Noosfera: a Comentora (estimula o comportamento), o Escudo
+ * Os cinco espaços da Noosfera: a Areté (os hábitos; a antiga Comentora), o Escudo
  * (o Aspis no código: protege a atenção), o Kinesis (tira da cadeira), o Kairós (as
  * tarefas) e o Zazen (senta). Telas que abrem por cima (chat, configurações,
  * respiração…) continuam na pilha raiz e cobrem a barra; as do Aspis ficam dentro da aba dele.
@@ -214,7 +215,14 @@ export function MainTabs() {
         options={{
           title: ROTULOS.Home,
           tabBarItemStyle: barra.item('Home'),
-          tabBarIcon: ({ color, size }) => <GreekIcon name="owl" size={size} color={color} />,
+          tabBarIcon: ({ size, focused }) =>
+            ESPACIAL || ECOLOGICO ? (
+              <View style={{ opacity: focused ? 1 : 0.55 }}>
+                <Simbolo size={size} animated={false} />
+              </View>
+            ) : (
+              <Image source={ATENA_MINI} style={{ width: size, height: size, borderRadius: size / 2, opacity: focused ? 1 : 0.55 }} />
+            ),
         }}
       />
       <Tab.Screen

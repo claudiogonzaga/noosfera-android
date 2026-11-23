@@ -28,7 +28,9 @@ import { SrbaiSheet } from './SrbaiSheet';
 import { SlipSheet } from './SlipSheet';
 import { HabitCelebration, milestoneText } from './HabitCelebration';
 import { StrengthRing, withAlpha } from './habitShared';
-import { ChainStrip, chainA11y, chainDoneToday } from './HabitChain';
+import { ChainLine, ChainStrip, ShieldPips, chainA11y, chainCount, chainDoneToday } from './HabitChain';
+import { planSentence } from './habitShared';
+import { ECOLOGICO, ESPACIAL } from '../theme/tema';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   clearHabitDay,
@@ -63,6 +65,14 @@ interface Props {
   snack: Snack;
   /** Dia perfeito (todos os hábitos em formação feitos): a Home põe a coruja feliz. */
   onPerfectDay?: (perfect: boolean) => void;
+  /** Quantos dos hábitos em formação de hoje já estão feitos (o anel do cabeçalho). */
+  onProgress?: (done: number, total: number) => void;
+  /** Um hábito acabou de ser marcado como feito (Atena olha e pisca). */
+  onMarked?: () => void;
+  /** O que a tela põe entre o cartão "Agora" e as correntes (Zazen, Kinesis, sono). */
+  slot?: ReactNode;
+  /** Linhas a mais no cartão das correntes (Zazen e Kinesis, que ainda não são hábitos). */
+  extraChains?: { key: string; title: string; beads: string; note: string; onPress: () => void }[];
 }
 
 const PERIOD_LABEL: Record<HabitPeriod, string> = { manha: 'Manhã', tarde: 'Tarde', noite: 'Noite' };
@@ -87,7 +97,22 @@ function cleanDaysText(n: number | null): string {
   return `${n} dia${n === 1 ? '' : 's'} limpo${n === 1 ? '' : 's'}`;
 }
 
-export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
+/** O feito e o fio das contas: verde no espacial e no Gaia; na terracota, o preto da figura. */
+const BEAD_INK = ESPACIAL || ECOLOGICO ? colors.accent.success : colors.accent.gold;
+
+function nowMinutes(): number {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+function hhmmMin(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+/** O cartão "Agora" só mostra o que chega em até este tanto de minutos. */
+const AGORA_ADIANTE_MIN = 30;
+
+export function HabitsTodaySection({ refreshKey, snack, onPerfectDay, onProgress, onMarked, slot, extraChains }: Props) {
   const navigation = useNavigation<any>();
   const [items, setItems] = useState<TodayHabit[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -101,6 +126,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
   const [celebration, setCelebration] = useState<Awaited<ReturnType<typeof getPendingCelebration>>>(null);
   const [weeklyCard, setWeeklyCard] = useState(false);
   const [showFormed, setShowFormed] = useState(false);
+  const [showList, setShowList] = useState(false);
   const [showWeekDone, setShowWeekDone] = useState(false);
   const [dayHabit, setDayHabit] = useState<HabitDef | null>(null);
   const [srbaiHabit, setSrbaiHabit] = useState<HabitDef | null>(null);
@@ -170,6 +196,24 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
   useEffect(() => {
     onPerfectDay?.(perfect);
   }, [perfect, onPerfectDay]);
+  useEffect(() => {
+    onProgress?.(groups.done, groups.total);
+  }, [groups.done, groups.total, onProgress]);
+
+  // AGORA: o hábito em formação ainda por fazer que está na hora (até 90 min
+  // atrasado) ou chega em até 30 min; sem nenhum assim, o último que passou.
+  const nowItem = useMemo(() => {
+    const pend = groups.forming
+      .filter((i) => i.habit.kind === 'fazer' && ['pendente', 'sem_resposta', 'parcial'].includes(i.stats.today))
+      .sort((a, b) => hhmmMin(a.habit.scheduleTime) - hhmmMin(b.habit.scheduleTime));
+    if (pend.length === 0) return null;
+    const now = nowMinutes();
+    // Nada que esteja a mais de 30 min no futuro (pedido de 16/11/2026): "Agora" é agora.
+    const perto = pend.filter((i) => hhmmMin(i.habit.scheduleTime) <= now + AGORA_ADIANTE_MIN);
+    if (perto.length === 0) return null;
+    return perto.find((i) => hhmmMin(i.habit.scheduleTime) >= now - 90) ?? perto[perto.length - 1];
+  }, [groups.forming]);
+  const chainItems = useMemo(() => groups.forming.filter((i) => i.habit.kind === 'fazer'), [groups.forming]);
 
   // ——— marcar ———
   const handleResult = useCallback(
@@ -238,8 +282,31 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
     // Pendente (ou a coruja desistiu de cobrar): um toque = feito.
     patchToday(habit.type, 'feito');
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    onMarked?.();
     try {
       const r = await markHabit(habit.type, 'feito', { via: 'home' });
+      handleResult(r, habit, () => {
+        clearHabitDay(habit.type)
+          .catch(() => {})
+          .finally(() => void load());
+      });
+    } catch (err) {
+      console.warn('markHabit:', err);
+      patchToday(habit.type, st);
+      snack('Não consegui marcar agora. Tente de novo.');
+    }
+    void load();
+  };
+
+  /** A versão mínima, direto do cartão "Agora": conta como feito. */
+  const onMinimum = async (it: TodayHabit) => {
+    const { habit, stats } = it;
+    const st = stats.today;
+    patchToday(habit.type, 'minimo');
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    onMarked?.();
+    try {
+      const r = await markHabit(habit.type, 'minimo', { via: 'home' });
       handleResult(r, habit, () => {
         clearHabitDay(habit.type)
           .catch(() => {})
@@ -347,24 +414,157 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
         <Card style={styles.card}>
           <Text style={styles.emptyTitle}>Comece por um hábito pequeno</Text>
           <Text style={styles.cardText}>
-            Um só, ligado a algo que você já faz todo dia — depois do café, ao chegar em casa. A coruja
-            lembra no começo e vai soltando conforme ele se forma.
+            Um só, ligado a algo que você já faz todo dia — depois do café, ao chegar em casa. Os avisos
+            lembram no começo e vai soltando conforme ele se forma.
           </Text>
           <View style={{ height: spacing.md }} />
           <Button label="Criar meu primeiro hábito" onPress={() => navigation.navigate('HabitEdit')} />
         </Card>
       ) : (
-        <Card style={styles.card}>
-          <View style={styles.todayHead}>
-            <Text style={styles.todayTitle} accessibilityRole="header">
-              Hoje
+        <>
+        {/* ——— AGORA: um hábito de cada vez ——— */}
+        {nowItem ? (
+          <Card style={styles.card}>
+            <Text style={styles.nowLabel}>
+              AGORA · {nowItem.habit.scheduleTime}
             </Text>
-            {groups.total > 0 && (
-              <Text style={styles.todayCount} accessibilityLabel={`${groups.done} de ${groups.total} feitos`}>
-                {groups.done} de {groups.total}
+            <Pressable
+              onLongPress={() => setDayHabit(nowItem.habit)}
+              onPress={() => navigation.navigate('HabitDetail', { type: nowItem.habit.type })}
+              accessibilityRole="button"
+              accessibilityLabel={`${nowItem.habit.title}. Abrir o hábito.`}
+            >
+              <Text style={styles.nowTitle}>{cap(nowItem.habit.title)}</Text>
+              <Text style={styles.nowPlan}>{planSentence(nowItem.habit)}</Text>
+            </Pressable>
+            <View style={styles.nowBtns}>
+              {nowItem.habit.action ? (
+                <Pressable style={styles.nowPrimary} onPress={() => openTool(nowItem.habit.action!)} accessibilityRole="button">
+                  <Text style={styles.nowPrimaryText}>{ACTION_INFO[nowItem.habit.action].label}</Text>
+                </Pressable>
+              ) : (
+                <Pressable style={styles.nowPrimary} onPress={() => void onTap(nowItem)} accessibilityRole="button">
+                  <Text style={styles.nowPrimaryText}>Feito</Text>
+                </Pressable>
+              )}
+              {nowItem.habit.minimum ? (
+                <Pressable style={styles.nowSecondary} onPress={() => void onMinimum(nowItem)} accessibilityRole="button">
+                  <Text style={styles.nowSecondaryText} numberOfLines={1}>
+                    Mínima: {nowItem.habit.minimum}
+                  </Text>
+                </Pressable>
+              ) : nowItem.habit.action ? (
+                <Pressable style={styles.nowSecondary} onPress={() => void onTap(nowItem)} accessibilityRole="button">
+                  <Text style={styles.nowSecondaryText}>Já fiz</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <View style={styles.nowFoot}>
+              <Text style={[styles.nowMeta, nowItem.stats.chain.atRisk && { color: colors.accent.danger }]} numberOfLines={1}>
+                {nowItem.stats.chain.length > 0
+                  ? `Corrente de ${chainCount(nowItem.stats.chain)}${nowItem.stats.chain.atRisk ? ' · sem escudo' : ''}`
+                  : 'Hoje começa a corrente'}
               </Text>
+              <ShieldPips shields={nowItem.stats.chain.shields} cap={nowItem.stats.chain.cap} size={13} />
+            </View>
+            {/* Plano incompleto: sem pista ou sem versão mínima, o hábito depende de lembrar. */}
+            {(!nowItem.habit.cue || !nowItem.habit.minimum) && (
+              <Pressable
+                onPress={() => navigation.navigate('HabitEdit', { type: nowItem.habit.type })}
+                style={styles.nowFix}
+                accessibilityRole="button"
+              >
+                <Text style={styles.nowFixText}>
+                  {!nowItem.habit.cue ? 'Falta a pista: depois de quê você faz isto?' : 'Falta a versão mínima, para os dias ruins.'} Completar →
+                </Text>
+              </Pressable>
             )}
-          </View>
+          </Card>
+        ) : groups.total > 0 ? (
+          <Card style={styles.card}>
+            <Text style={styles.nowLabel}>AGORA</Text>
+            <Text style={styles.nowTitle}>{perfect ? 'Tudo de hoje, feito' : 'Nada pendente agora'}</Text>
+            <Text style={styles.nowPlan}>
+              {perfect ? 'As correntes de hoje estão fechadas.' : 'O que falta hoje está na lista, mais abaixo.'}
+            </Text>
+          </Card>
+        ) : null}
+
+        {slot}
+
+        {/* ——— AS CORRENTES: uma conta por dia, ligadas pelo fio ——— */}
+        {(chainItems.length > 0 || (extraChains?.length ?? 0) > 0) && (
+          <Card style={styles.card}>
+            <Text style={styles.nowLabel}>AS CORRENTES · ÚLTIMOS 7 DIAS</Text>
+            {chainItems.map((it) => (
+              <Pressable
+                key={it.habit.type}
+                style={styles.beadRow}
+                onPress={() => void onTap(it)}
+                onLongPress={() => setDayHabit(it.habit)}
+                delayLongPress={350}
+                accessibilityRole="button"
+                accessibilityLabel={`${it.habit.title}, ${chainA11y(it.stats.chain)}`}
+                accessibilityHint={isDone(it.stats.today) ? 'Toque para desmarcar hoje.' : 'Toque para marcar hoje.'}
+              >
+                <View style={styles.beadHead}>
+                  <Text style={styles.beadTitle} numberOfLines={1}>
+                    {cap(it.habit.title)}
+                  </Text>
+                  <Text style={[styles.beadNote, it.stats.chain.atRisk && { color: colors.accent.danger }]}>
+                    {it.stats.chain.length > 0 ? chainCount(it.stats.chain) : it.stats.chain.unit === 'semana' ? 'por semana' : ''}
+                  </Text>
+                  <ShieldPips shields={it.stats.chain.shields} cap={it.stats.chain.cap} size={12} />
+                </View>
+                <ChainLine chain={it.stats.chain} count={7} fill contas ink={BEAD_INK} r={8} height={30} />
+              </Pressable>
+            ))}
+            {(extraChains ?? []).map((x) => (
+              <Pressable key={x.key} style={styles.beadRow} onPress={x.onPress} accessibilityRole="button" accessibilityLabel={`${x.title}, ${x.note}`}>
+                <View style={styles.beadHead}>
+                  <Text style={styles.beadTitle} numberOfLines={1}>
+                    {x.title}
+                  </Text>
+                  <Text style={styles.beadNote}>{x.note}</Text>
+                </View>
+                <ChainLine
+                  chain={{ unit: 'dia', length: 0, best: 0, shields: 0, cap: 1, nextShieldIn: null, lost: null, beads: x.beads, atRisk: false }}
+                  count={7}
+                  fill
+                  contas
+                  ink={BEAD_INK}
+                  r={8}
+                  height={30}
+                />
+              </Pressable>
+            ))}
+            <Text style={styles.beadLegend}>
+              Cheia: feito. Escudo: a falta que o escudo segurou. Tracejada em vermelho: o elo que partiu. Toque na linha para marcar hoje.
+            </Text>
+          </Card>
+        )}
+
+        <Card style={styles.card}>
+          <Pressable
+            style={styles.todayHead}
+            onPress={() => setShowList((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showList }}
+          >
+            <Text style={styles.listTitle} accessibilityRole="header">
+              Todos de hoje
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+              {groups.total > 0 && (
+                <Text style={styles.todayCount} accessibilityLabel={`${groups.done} de ${groups.total} feitos`}>
+                  {groups.done} de {groups.total}
+                </Text>
+              )}
+              <View style={{ transform: [{ rotate: showList ? '90deg' : '0deg' }] }}>
+                <GreekIcon name="chevronRight" size={16} color={colors.text.tertiary} />
+              </View>
+            </View>
+          </Pressable>
           {groups.total > 0 && (
             <View style={styles.progress}>
               <View
@@ -385,7 +585,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
           )}
 
           {(['manha', 'tarde', 'noite'] as HabitPeriod[]).map((p) =>
-            groups.byPeriod[p].length === 0 ? null : (
+            !showList || groups.byPeriod[p].length === 0 ? null : (
               <View key={p}>
                 <Text style={styles.period}>{PERIOD_LABEL[p]}</Text>
                 {groups.byPeriod[p].map((it) => (
@@ -403,7 +603,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
             ),
           )}
 
-          {groups.weekDone.length > 0 && (
+          {showList && groups.weekDone.length > 0 && (
             <CollapsedGroup
               label={`Feitos esta semana (${groups.weekDone.length})`}
               open={showWeekDone}
@@ -421,7 +621,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
             </CollapsedGroup>
           )}
 
-          {groups.formed.length > 0 && (
+          {showList && groups.formed.length > 0 && (
             <CollapsedGroup
               label={`Formados (${groups.formed.length})`}
               open={showFormed}
@@ -445,6 +645,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
             </Pressable>
           )}
         </Card>
+        </>
       )}
 
       {/* ——— LEMBRETES DE HOJE ——— */}
@@ -515,7 +716,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
           <Text style={styles.linkText}>+ Novo hábito</Text>
         </Pressable>
         <Pressable onPress={() => navigation.navigate('Habits')} style={styles.link} accessibilityRole="button">
-          <Text style={styles.linkText}>Todos os hábitos →</Text>
+          <Text style={styles.linkText}>Todos →</Text>
         </Pressable>
       </View>
 
@@ -527,8 +728,8 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
             <Text style={styles.cardLabel}>HÁBITOS E LEMBRETES, SEPARADOS</Text>
           </View>
           <Text style={styles.cardText}>
-            Separei o que estava em “Meus hábitos”: {migration.habits.length} viraram hábitos (a coruja vai
-            soltando conforme se formam) e {migration.reminders.length} ficaram como lembretes (esses lembram
+            Separei o que estava em “Meus hábitos”: {migration.habits.length} viraram hábitos (os avisos vão
+            rareando conforme se formam) e {migration.reminders.length} ficaram como lembretes (esses lembram
             sempre). Algo no lugar errado? Mova.
           </Text>
           {migration.habits.length > 0 && <Text style={styles.subLabel}>Hábitos</Text>}
@@ -601,7 +802,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay }: Props) {
             <Text style={styles.cardLabel}>JÁ SAI SEM PENSAR?</Text>
           </View>
           <Text style={styles.cardText}>
-            Quatro perguntas rápidas dizem se o hábito já está automático — e se a coruja pode lembrar menos.
+            Quatro perguntas rápidas dizem se o hábito já está automático — e se os avisos podem rarear.
           </Text>
           {dueSrbai.map((h) => (
             <View key={h.type} style={styles.moveRow}>
@@ -957,7 +1158,44 @@ const styles = StyleSheet.create({
   moveName: { ...typography.bodyMedium, color: colors.text.primary, flex: 1 },
   emptyTitle: { ...typography.subtitle, color: colors.text.primary },
 
-  todayHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  nowLabel: { ...typography.label, color: colors.text.tertiary, textTransform: 'uppercase' },
+  nowTitle: { ...typography.title, color: colors.text.primary, marginTop: spacing.xs },
+  nowPlan: { ...typography.body, fontSize: 15, lineHeight: 21, color: colors.text.secondary, marginTop: 2 },
+  nowBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  nowPrimary: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  nowPrimaryText: { ...typography.button, color: colors.text.onGold },
+  nowSecondary: {
+    minHeight: 46,
+    maxWidth: '55%',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  nowSecondaryText: { ...typography.button, fontSize: 14, color: colors.accent.gold },
+  nowFoot: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  nowMeta: { ...typography.small, color: colors.text.tertiary, flexShrink: 1 },
+  nowFix: { marginTop: spacing.sm, minHeight: 36, justifyContent: 'center' },
+  nowFixText: { ...typography.small, color: colors.accent.gold, lineHeight: 18 },
+
+  beadRow: { paddingTop: spacing.md },
+  beadHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 2 },
+  beadTitle: { ...typography.bodyMedium, fontSize: 15, color: colors.text.primary, flex: 1 },
+  beadNote: { ...typography.small, color: colors.text.secondary },
+  beadLegend: { ...typography.small, fontSize: 12, lineHeight: 17, color: colors.text.tertiary, marginTop: spacing.md },
+  listTitle: { ...typography.subtitle, color: colors.text.primary },
+
+  todayHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 32 },
   todayTitle: { ...typography.title, color: colors.text.primary },
   todayCount: { ...typography.bodyMedium, color: colors.text.secondary },
   progress: {

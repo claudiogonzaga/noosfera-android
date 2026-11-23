@@ -24,7 +24,17 @@ import { useAppStore } from '../store/useAppStore';
 import { isGeneratingSame, keepScreenOnFor, useReadAloud } from '../store/useReadAloud';
 import { prepareReadAloudAudio } from '../services/voice';
 import { READ_ALOUD_NATIVE, settleReadAloudJobs } from '../services/geminiTTS';
-import { docxToText, fetchGoogleDocText, googleDocId, isDocx } from '../services/importText';
+import {
+  docxToText,
+  fetchGoogleDocInfo,
+  fetchGoogleDocText,
+  GoogleAccountNeeded,
+  googleDocId,
+  isDocx,
+} from '../services/importText';
+import { configureGoogle } from '../aspis/services/auth';
+import { useAppStore as useGoogleStore } from '../aspis/store/useAppStore';
+import { docAudioOf, planReadAloudDoc, syncReadAloudDoc } from '../services/readAloudDoc';
 import {
   startReadAloudKeepAlive,
   stopReadAloudKeepAlive,
@@ -36,6 +46,7 @@ import {
   listReadAloudTexts,
   renameReadAloudText,
   setKV,
+  setReadAloudTextDoc,
   updateReadAloudTextAudio,
 } from '../services/database';
 import type { ReadAloudText } from '../types';
@@ -315,6 +326,38 @@ export function ReadAloudScreen() {
     }
   };
 
+  // A conta Google é conectada AQUI, pela Noosfera (pedido de 22/11/2026): sem
+  // conta, a janela do Google abre na hora e a ação segue; se a pessoa fechar a
+  // janela, fica um cartão com o botão "Entrar com o Google" nesta tela.
+  const googleUser = useGoogleStore((st) => st.user);
+  const [needsGoogle, setNeedsGoogle] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const connectGoogle = async (): Promise<boolean> => {
+    setConnecting(true);
+    try {
+      configureGoogle();
+      const user = await useGoogleStore.getState().googleSignIn();
+      setNeedsGoogle(!user);
+      return !!user;
+    } catch (e) {
+      setNeedsGoogle(true);
+      Alert.alert('Não consegui conectar a conta Google', e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setConnecting(false);
+    }
+  };
+  /** Roda `fn`; se faltar a conta Google, abre o login e tenta de novo. null = a pessoa não conectou. */
+  const withGoogle = async <T,>(fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!(e instanceof GoogleAccountNeeded)) throw e;
+      if (!(await connectGoogle())) return null;
+      return fn();
+    }
+  };
+
   // Um link do Google Docs colado no campo: troca pelo texto do documento.
   const docId = googleDocId(text);
   const [importingDoc, setImportingDoc] = useState(false);
@@ -322,11 +365,134 @@ export function ReadAloudScreen() {
     if (!docId) return;
     setImportingDoc(true);
     try {
-      setText(await fetchGoogleDocText(docId));
+      const content = await withGoogle(() => fetchGoogleDocText(docId));
+      if (content != null) setText(content);
     } catch (e) {
       Alert.alert('Não consegui trazer o documento', e instanceof Error ? e.message : String(e));
     } finally {
       setImportingDoc(false);
+    }
+  };
+
+  // Texto VINCULADO a um Google Docs: antes de tocar, confere se o documento
+  // mudou; se mudou, gera de novo só os trechos alterados. `fresh` gera tudo.
+  const [docBusyId, setDocBusyId] = useState<number | null>(null);
+  const [docNote, setDocNote] = useState<{ id: number; text: string } | null>(null);
+  const playDoc = async (item0: ReadAloudText, o: { fresh?: boolean } = {}) => {
+    if (docBusyId != null) return;
+    Keyboard.dismiss();
+    setDocBusyId(item0.id);
+    setDocNote({ id: item0.id, text: 'Conferindo o documento…' });
+    let item = item0;
+    let note = '';
+    try {
+      let sync = await syncReadAloudDoc(item0);
+      // Falta a conta Google: conecta aqui mesmo e confere de novo.
+      if (sync.needsGoogle && (await connectGoogle())) sync = await syncReadAloudDoc(item0);
+      item = sync.item;
+      if (!sync.checked) {
+        note = `Não consegui conferir o documento agora${sync.error ? ` (${sync.error})` : ''}. Usei o texto guardado.`;
+      } else if (sync.changed) {
+        note = 'O documento mudou.';
+      } else {
+        note = 'Documento sem alteração.';
+      }
+      if (sync.changed) await reloadSaved();
+    } finally {
+      setDocBusyId(null);
+    }
+    const title = item.title || titleFor(item.content.trim());
+    if (provider !== 'gemini') {
+      setDocNote({ id: item.id, text: note });
+      startRead(item.content, title);
+      return;
+    }
+    const plan = planReadAloudDoc(item, geminiVoiceName, paused);
+    if (plan.upToDate && !o.fresh && item.audioUri) {
+      setDocNote({ id: item.id, text: note });
+      void useReadAloud.getState().playSavedUri(item.audioUri, title, rate);
+      return;
+    }
+    if (saveInProgress(item.content)) return;
+    const total = plan.chunks.length;
+    const quantos = o.fresh ? total : plan.novos;
+    setDocNote({
+      id: item.id,
+      text: o.fresh
+        ? `Gerando todo o áudio de novo (${total} ${total === 1 ? 'trecho' : 'trechos'}).`
+        : quantos >= total
+          ? `Gerando o áudio (${total} ${total === 1 ? 'trecho' : 'trechos'}).`
+          : `${note} Gerando ${quantos} de ${total} ${total === 1 ? 'trecho' : 'trechos'}; o resto é reaproveitado.`,
+    });
+    const voice = geminiVoiceName;
+    const id = item.id;
+    void useReadAloud.getState().startGemini(item.content.trim(), title, {
+      provider: 'gemini',
+      geminiVoiceName: voice,
+      paused,
+      rate,
+      doc: {
+        prevChunks: o.fresh ? null : plan.prevChunks,
+        fresh: o.fresh,
+        tag: `text:${id}`,
+        onReady: async (uri, chunks) => {
+          await updateReadAloudTextAudio(id, uri, voice);
+          await setReadAloudTextDoc(id, { docAudio: docAudioOf(plan, chunks) });
+          await reloadSaved();
+        },
+      },
+    });
+  };
+
+  const confirmRegenerate = (item: ReadAloudText) => {
+    Alert.alert(
+      'Gerar todo o áudio de novo',
+      `Vou gerar outra vez o áudio inteiro de "${item.title}", sem reaproveitar nenhum trecho. Isso gasta a cota do Gemini.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Gerar tudo', onPress: () => void playDoc(item, { fresh: true }) },
+      ],
+    );
+  };
+
+  // Vincula o Google Docs do link colado: o texto passa a acompanhar o documento.
+  const [linkingDoc, setLinkingDoc] = useState(false);
+  const linkGoogleDoc = async () => {
+    if (!docId || linkingDoc) return;
+    setLinkingDoc(true);
+    try {
+      // Um de cada vez (ver driveToken em importText): nome e data, depois o texto.
+      const got = await withGoogle(async () => {
+        const i = await fetchGoogleDocInfo(docId);
+        return [i, await fetchGoogleDocText(docId)] as const;
+      });
+      if (!got) return; // fechou a janela do Google: o cartão de conectar fica na tela
+      const [info, content] = got;
+      if (!content.trim()) throw new Error('O documento está vazio.');
+      const list = await listReadAloudTexts();
+      let item = list.find((x) => x.docId === docId);
+      if (!item) {
+        item = await createReadAloudText({
+          title: (info.name || titleFor(content)).slice(0, 48),
+          content,
+        });
+      }
+      await setReadAloudTextDoc(item.id, { docId, content, docModified: info.modifiedTime || null });
+      setText('');
+      await reloadSaved();
+      const linked = { ...item, docId, content, docModified: info.modifiedTime || null };
+      Alert.alert(
+        'Documento vinculado',
+        'Ele fica na lista de salvos. Toda vez que você tocar, eu confiro se o documento mudou e gero de novo só o trecho alterado.',
+        [
+          { text: 'Depois' },
+          { text: 'Gerar o áudio agora', onPress: () => void playDoc(linked) },
+        ],
+      );
+    } catch (e) {
+      Alert.alert('Não consegui vincular o documento', e instanceof Error ? e.message : String(e));
+    } finally {
+      setLinkingDoc(false);
     }
   };
 
@@ -547,6 +713,10 @@ export function ReadAloudScreen() {
         // O fallback do salvo mais recente (autostart da respiração) toca sem
         // sobrescrever: trocar a caixa apagava o rascunho não salvo, que o
         // cleanup da tela ainda gravava por cima em read_aloud_draft.
+        if (chosen.docId) {
+          void playDoc(chosen);
+          return;
+        }
         if (chosen === match || !t) setText(chosen.content);
         void useReadAloud
           .getState()
@@ -586,6 +756,10 @@ export function ReadAloudScreen() {
 
   // Texto SALVO: se já tem áudio guardado, toca direto (instantâneo); senão gera.
   const handlePlaySaved = (item: ReadAloudText) => {
+    if (item.docId) {
+      void playDoc(item);
+      return;
+    }
     if (!item.audioUri && saveInProgress(item.content)) return;
     setText(item.content);
     if (item.audioUri) {
@@ -598,7 +772,9 @@ export function ReadAloudScreen() {
 
   // Início automático quando a tela é aberta encadeada (respiração → leitura).
   useEffect(() => {
-    if (!autostart || autostartedRef.current || !draftLoaded || !text.trim()) return;
+    if (!autostart || autostartedRef.current || !draftLoaded) return;
+    // Caixa vazia (o texto veio de um Google Docs vinculado): toca o salvo mais recente.
+    if (!text.trim() && saved.length === 0) return;
     autostartedRef.current = true;
     // Encadeado da respiração: toca o áudio JÁ SALVO (o do texto da caixinha ou,
     // se não houver, o salvo mais recente) — não regera quando já existe arquivo.
@@ -606,7 +782,7 @@ export function ReadAloudScreen() {
     // autostart precisa rodar no escuro.
     void playPreferSaved(textRef.current, { fallbackMostRecent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autostart, draftLoaded, text]);
+  }, [autostart, draftLoaded, text, saved.length]);
 
   const busy = status === 'generating' || status === 'playing' || status === 'paused';
   const showPlayer = (status === 'playing' || status === 'paused') && isGemini;
@@ -624,7 +800,8 @@ export function ReadAloudScreen() {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.intro}>
           Cole ou importe um texto — visualização, oração, auto-hipnose — e a
-          Comentora lê em voz alta. Também dá pra colar o link de um Google Docs.
+          Comentora lê em voz alta. Cole o link de um Google Docs para vincular o
+          documento: o áudio passa a acompanhar as alterações dele.
           Na voz do Gemini, dá pra arrastar a barrinha para voltar/avançar. Ao
           salvar, o áudio é preparado em segundo plano (acompanhe na notificação):
           pode apagar a tela ou sair do app.
@@ -649,12 +826,36 @@ export function ReadAloudScreen() {
           )}
         </View>
 
+        {needsGoogle && !googleUser && (
+          <View style={styles.googleCard}>
+            <Text style={styles.googleCardTitle}>Conectar a conta Google</Text>
+            <Text style={styles.googleCardText}>
+              Para ler o seu Google Docs e conferir se ele mudou, a Noosfera precisa da sua conta
+              Google. O acesso ao Drive é só de leitura.
+            </Text>
+            <Button
+              label={connecting ? 'Abrindo o Google…' : 'Entrar com o Google'}
+              onPress={() => void connectGoogle()}
+              disabled={connecting}
+            />
+          </View>
+        )}
         {docId && (
           <>
             <Button
-              label={importingDoc ? 'Trazendo o documento…' : 'Trazer o texto do Google Docs'}
+              label={linkingDoc ? 'Vinculando o documento…' : 'Vincular este Google Docs'}
+              onPress={linkGoogleDoc}
+              disabled={linkingDoc || importingDoc}
+            />
+            <Text style={styles.uploadHint}>
+              Vinculado, o áudio acompanha o documento: a cada vez que tocar, confiro se ele
+              mudou e gero de novo só o trecho alterado.
+            </Text>
+            <Button
+              label={importingDoc ? 'Trazendo o documento…' : 'Só trazer o texto (sem vincular)'}
+              variant="secondary"
               onPress={importGoogleDoc}
-              disabled={importingDoc}
+              disabled={importingDoc || linkingDoc}
             />
             <View style={{ height: spacing.sm }} />
           </>
@@ -731,15 +932,37 @@ export function ReadAloudScreen() {
                             {item.title}
                           </Text>
                         </Pressable>
-                        <Text style={styles.savedSub} numberOfLines={1}>
-                          {item.audioUri
-                            ? '▶ ouvir · toque no nome para renomear'
-                            : '▶ ouvir (gera na 1ª vez) · toque no nome p/ renomear'}
-                        </Text>
+                        {item.docId ? (
+                          <>
+                            <Text style={styles.savedSub} numberOfLines={3}>
+                              {docNote?.id === item.id
+                                ? docNote.text
+                                : 'Google Docs vinculado · confere o documento ao tocar'}
+                            </Text>
+                            <Pressable
+                              onPress={() => confirmRegenerate(item)}
+                              hitSlop={8}
+                              disabled={docBusyId != null || status === 'generating'}
+                            >
+                              <Text style={styles.savedExport}>Gerar todo o áudio de novo</Text>
+                            </Pressable>
+                            {item.audioUri && (
+                              <Pressable onPress={() => handleExportAudio(item)} hitSlop={8}>
+                                <Text style={styles.savedExport}>Exportar o áudio</Text>
+                              </Pressable>
+                            )}
+                          </>
+                        ) : (
+                          <Text style={styles.savedSub} numberOfLines={1}>
+                            {item.audioUri
+                              ? '▶ ouvir · toque no nome para renomear'
+                              : '▶ ouvir (gera na 1ª vez) · toque no nome p/ renomear'}
+                          </Text>
+                        )}
                       </>
                     )}
                   </View>
-                  {!editing && item.audioUri && (
+                  {!editing && item.audioUri && !item.docId && (
                     <Pressable onPress={() => handleExportAudio(item)} hitSlop={8}>
                       <Text style={styles.savedExport}>Exportar</Text>
                     </Pressable>
@@ -873,6 +1096,16 @@ export function ReadAloudScreen() {
 }
 
 const styles = StyleSheet.create({
+  googleCard: {
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  googleCardTitle: { ...typography.label, color: colors.accent.gold },
+  googleCardText: { ...typography.small, color: colors.text.secondary, lineHeight: 18 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

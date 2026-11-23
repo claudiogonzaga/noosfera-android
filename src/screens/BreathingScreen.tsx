@@ -223,7 +223,7 @@ export function BreathingScreen() {
           <Button
             label="Pular para dormir"
             variant="ghost"
-            onPress={() => navigation.navigate('Chat')}
+            onPress={() => navigation.navigate('Main', { screen: 'Home' })}
           />
         </View>
 

@@ -491,6 +491,59 @@ export function chunkText(text: string, maxLen = 3500): string[] {
 }
 
 /**
+ * Fatia a versão NOVA de um texto reaproveitando os trechos da versão anterior
+ * (`prev`): os trechos iguais do começo e do fim do texto ficam idênticos, e só o
+ * miolo que mudou é fatiado de novo. Como o áudio de cada trecho é guardado pelo
+ * seu texto, só o miolo é gerado outra vez. Sem `prev` (ou sem nada em comum),
+ * é o chunkText de sempre. Texto igual ao anterior devolve os mesmos trechos.
+ */
+export function rechunkText(text: string, prev: string[] | null | undefined, maxLen = 3500): string[] {
+  const fresh = chunkText(text, maxLen);
+  if (!prev || prev.length === 0 || fresh.length === 0) return fresh;
+  // O texto como o chunkText o enxerga: parágrafos limpos, separados por linha em branco.
+  const norm = text
+    .replace(/\r\n/g, '\n')
+    .trim()
+    .split(/\n[ \t]*\n+/)
+    .map((p) => p.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n\n');
+  const SEP = '\n\n';
+  const old = prev.map((c) => c.trim()).filter(Boolean);
+
+  // Começo igual: trechos antigos que abrem o texto novo, cada um terminando num parágrafo.
+  const head: string[] = [];
+  let start = 0;
+  for (const c of old) {
+    if (c.length > maxLen || !norm.startsWith(c, start)) break;
+    const end = start + c.length;
+    if (end === norm.length) {
+      head.push(c);
+      start = end;
+      break;
+    }
+    if (!norm.startsWith(SEP, end)) break;
+    head.push(c);
+    start = end + SEP.length;
+  }
+  if (start >= norm.length) return head;
+
+  // Fim igual: trechos antigos que fecham o texto novo, cada um começando num parágrafo.
+  const tail: string[] = [];
+  let stop = norm.length;
+  for (let i = old.length - 1; i >= head.length; i--) {
+    const c = old[i];
+    const from = stop - c.length;
+    if (c.length > maxLen || from < start + SEP.length || !norm.startsWith(c, from)) break;
+    if (norm.slice(from - SEP.length, from) !== SEP) break;
+    tail.unshift(c);
+    stop = from - SEP.length;
+  }
+  const middle = stop > start ? chunkText(norm.slice(start, stop), maxLen) : [];
+  return [...head, ...middle, ...tail];
+}
+
+/**
  * "Leitura pausada" (visualização / auto-hipnose): separa cada FRASE por uma
  * linha em branco, fazendo o TTS pausar mais entre elas. O chunkText depois
  * reagrupa essas frases-parágrafo nos pedaços, mantendo as pausas.
@@ -585,19 +638,41 @@ export async function prepareReadAloudAudio(
     /** Liga o áudio ao texto salvo mesmo se o app fechar no meio (ex.: "text:12"). */
     tag?: string;
     title?: string;
+    /**
+     * Texto vinculado a um Google Docs: os trechos do áudio anterior (null = ainda
+     * não há). Os trechos ficam guardados e só o que mudou é gerado de novo.
+     */
+    doc?: { prevChunks: string[] | null; fresh?: boolean; onChunks?: (chunks: string[]) => void };
   } = {},
 ): Promise<string | null> {
-  const src = opts.paused ? addSentencePauses(text) : text;
-  const chunks = chunkText(src, GEMINI_CHUNK_MAX);
+  const chunks = readAloudChunks(text, { paused: opts.paused, prevChunks: opts.doc?.prevChunks });
   if (chunks.length === 0) return null;
+  opts.doc?.onChunks?.(chunks);
   const { uri } = await synthesizeFullSpeechGemini(
     chunks,
     opts.geminiVoiceName ?? activeGeminiVoiceName,
     opts.onProgress,
     opts.signal,
-    { tag: opts.tag, title: opts.title },
+    {
+      tag: opts.tag,
+      title: opts.title,
+      ...(opts.doc
+        ? { keepChunks: true, fresh: !!opts.doc.fresh, dropChunks: opts.doc.prevChunks ?? [] }
+        : {}),
+    },
   );
   return uri;
+}
+
+/** Os trechos em que o áudio desta leitura é gerado (reaproveitando os de `prevChunks`). */
+export function readAloudChunks(
+  text: string,
+  opts: { paused?: boolean; prevChunks?: string[] | null } = {},
+): string[] {
+  const src = opts.paused ? addSentencePauses(text) : text;
+  return opts.prevChunks
+    ? rechunkText(src, opts.prevChunks, GEMINI_CHUNK_MAX)
+    : chunkText(src, GEMINI_CHUNK_MAX);
 }
 
 /**

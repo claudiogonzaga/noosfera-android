@@ -10,6 +10,7 @@
 // Sem chave / provider "system" / falha de cota: cai na VOZ DO SISTEMA (o serviço
 // nativo fala o texto). O nudge SEMPRE acontece — só muda a voz.
 
+import { VOZ_DA_COMENTORA } from './avisoFlags';
 import { Platform } from 'react-native';
 import { requireNativeModule } from 'expo-modules-core';
 import { getUserConfig } from './database';
@@ -697,7 +698,7 @@ async function syncSpokenMedicationsOnce(
   let voiceName = DEFAULT_GEMINI_VOICE;
   try {
     const c = await getUserConfig();
-    enabled = !!c.spokenNudgesEnabled && !c.silentMode; // master toggle; silencioso suprime
+    enabled = VOZ_DA_COMENTORA && !!c.spokenNudgesEnabled && !c.silentMode; // master toggle; silencioso suprime
     useGemini = c.voiceProvider === 'gemini';
     voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
   } catch {
@@ -933,7 +934,7 @@ export async function syncSpokenTasks(source: SpokenTaskSource, items: SpokenTas
   let voiceName = DEFAULT_GEMINI_VOICE;
   try {
     const c = await getUserConfig();
-    enabled = !!c.spokenNudgesEnabled && !c.silentMode;
+    enabled = VOZ_DA_COMENTORA && !!c.spokenNudgesEnabled && !c.silentMode;
     useGemini = c.voiceProvider === 'gemini';
     voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
   } catch {
@@ -1013,7 +1014,7 @@ export async function armSpokenTask(source: SpokenTaskSource, item: SpokenTaskAl
   if (!native) return;
   try {
     const c = await getUserConfig();
-    if (!c.spokenNudgesEnabled || c.silentMode) return;
+    if (!VOZ_DA_COMENTORA || !c.spokenNudgesEnabled || c.silentMode) return;
     const voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
     const audio =
       c.voiceProvider === 'gemini'

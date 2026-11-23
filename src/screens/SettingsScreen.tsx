@@ -16,7 +16,8 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
-import { TEMA, trocarTema, type Tema } from '../theme/tema';
+import { ESPACIAL, TEMA, trocarTema, type Tema } from '../theme/tema';
+import { EsferaPickerCard } from '../components/EsferaPickerCard';
 import { useAppStore } from '../store/useAppStore';
 import { deleteApiKey } from '../services/secureStore';
 import { deleteAllDownloadedModels } from '../services/modelDownload';
@@ -26,6 +27,7 @@ import { deleteAllAudioDeckFiles } from '../services/audioDecks';
 import { wipeAspisData } from '../aspis/bootstrap';
 import { deleteClaudeKey } from '../services/claude';
 import { scheduleInspirationNotifications } from '../services/inspiration';
+import { DeckPickerCard } from '../components/DeckPickerCard';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
 import { confirmAndRestoreBackup, deleteLocalDataCopies, exportBackup } from '../services/backup';
 import {
@@ -187,6 +189,9 @@ export function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        {/* O baralho das mensagens: escolha de um toque, no nível mais alto. */}
+        <DeckPickerCard />
+
         <Pressable onPress={() => navigation.navigate('AboutYou')}>
           <Card style={styles.linkCard}>
             <View style={styles.linkIcon}>
@@ -314,6 +319,8 @@ export function SettingsScreen() {
             ))}
           </View>
         </Card>
+
+        {ESPACIAL && <EsferaPickerCard />}
 
         <Card style={styles.card}>
           <Text style={styles.section}>Uso do celular</Text>

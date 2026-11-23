@@ -17,6 +17,7 @@ import {
 import {
   NUDGE_CATEGORY,
   NUDGE_CLOSE_CATEGORY,
+  NUDGE_NOW_CATEGORY,
   NUDGE_SOFT_CATEGORY,
   PARAR_CATEGORY,
   ensureChannel,
@@ -43,6 +44,7 @@ import {
 } from './strictHabits';
 import { refreshReviewNotification } from './review';
 import { refreshChainAlert } from './chainAlert';
+import { AVISOS_CURTOS, avisoAdiado, avisoCurto, refreshBadge } from './avisos';
 import { getRegressionNote } from './habitFormation';
 import { getPastSelfQuotesText } from './morning';
 import { getOwlSpecies } from '../constants/owlSpecies';
@@ -580,8 +582,8 @@ async function scheduleSnoozeNotification(
 ): Promise<string | null> {
   return gatedSchedule({
     content: {
-      title: `${n.emoji ?? '🦉'} ${n.title}`,
-      body: `${n.body}\n\nAinda pendente — toque em "Já fiz ✅" quando terminar.`,
+      title: n.emoji ? `${n.emoji} ${n.title}` : n.title,
+      body: AVISOS_CURTOS ? avisoAdiado(n) : `${n.body}\n\nAinda pendente — toque em "Já fiz ✅" quando terminar.`,
       data: {
         type: `nudge:${n.type}`,
         nudgeId: n.id,
@@ -592,7 +594,7 @@ async function scheduleSnoozeNotification(
         at: fireAt.getTime(),
       },
       sound,
-      categoryIdentifier: NUDGE_CATEGORY,
+      categoryIdentifier: AVISOS_CURTOS ? NUDGE_SOFT_CATEGORY : NUDGE_CATEGORY,
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -716,7 +718,7 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
     const safeMinute = Math.min(59, Math.max(0, m));
 
     const isVerify = !NON_VERIFY_NUDGE_TYPES.has(n.type);
-    const title = `${n.emoji ?? '🦉'} ${n.title}`;
+    const title = n.emoji ? `${n.emoji} ${n.title}` : n.title;
     const baseData = { type: `nudge:${n.type}`, nudgeId: n.id, nudgeType: n.type };
     const anchorToday = buildTodayAt(safeHour, safeMinute);
 
@@ -783,6 +785,8 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
       if (n.body?.trim()) anchorBody += `\n${n.body.trim()}`;
       const reg = await getRegressionNote(n.type, today, n.title).catch(() => null);
       if (reg) anchorBody = reg;
+      // Avisos curtos: uma ou duas frases, com a corrente em jogo.
+      if (AVISOS_CURTOS) anchorBody = avisoCurto(n, ev.stats);
     }
     // JÁ RESPONDIDO hoje e o horário ainda não chegou (marcou "Já fiz" de manhã
     // um hábito das 18h): o aviso de HOJE não pode tocar — nem o gentil de antes.
@@ -827,7 +831,9 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
           sound,
           // Um botão só ("Já fiz"): a pergunta vem meia hora depois. No de parar,
           // "Dia limpo" / "Escorreguei".
-          ...(isVerify ? { categoryIdentifier: n.kind === 'parar' ? PARAR_CATEGORY : NUDGE_SOFT_CATEGORY } : {}),
+          ...(isVerify
+            ? { categoryIdentifier: n.kind === 'parar' ? PARAR_CATEGORY : AVISOS_CURTOS ? NUDGE_NOW_CATEGORY : NUDGE_SOFT_CATEGORY }
+            : {}),
         },
         safeHour,
         safeMinute,
@@ -884,6 +890,20 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
         skipDay: answeredToday ? today : '',
         resumeAt: snoozeUntil > Date.now() ? snoozeUntil : 0,
       });
+    }
+
+    // AVISOS CURTOS: sem corrente, o "Mais tarde" ainda valendo precisa ser
+    // recriado aqui (o cancelAllNudges acima o apagou).
+    if (AVISOS_CURTOS && isVerify && scheduledToday && n.kind === 'fazer' && !settledIn(doneTypes, n.type)) {
+      const until = Number(await getKV(snoozeUntilKey(n.type)).catch(() => null)) || 0;
+      if (until > Date.now()) {
+        try {
+          const id = await scheduleSnoozeNotification(n, new Date(until), sound, channelId);
+          if (id) ids.push(id);
+        } catch (err) {
+          console.warn(`failed to re-schedule snooze ${n.type}:`, err);
+        }
+      }
     }
 
     // Corrente de hoje — só na fase que pede pergunta e cobranças, num dia do
@@ -1004,7 +1024,7 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
     try {
       const id = await gatedSchedule({
         content: {
-          title: '🦉 Revisão da semana',
+          title: 'Revisão da semana',
           body: 'Cinco minutos para olhar a semana dos seus hábitos e ajustar o que atrapalhou.',
           data: { type: 'nudge:weekly-review', weeklyReview: true },
           sound,
@@ -1021,6 +1041,7 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
   await refreshReviewNotification();
   // A última chamada da corrente: só existe se há corrente em jogo hoje.
   await refreshChainAlert();
+  void refreshBadge();
 
   // Arma sem esperar a rede (a voz do Gemini vem depois). Com await, para quem
   // espera esta passada (settleNudgeScheduling) cancelar a voz já com tudo armado.
@@ -1068,6 +1089,8 @@ async function closeNudgeChain(nudgeType: string, day: string, scheduledHHMM: st
   } catch {
     /* dismissal is best-effort */
   }
+
+  void refreshBadge();
 
   const mins = scheduledHHMM ? hhmmToMinutes(scheduledHHMM) : null;
   if (day === todayISO() && mins !== null) {

@@ -16,6 +16,16 @@ export interface ReadAloudStartOpts {
   language?: string | null;
   paused?: boolean;
   rate?: number;
+  /**
+   * Texto vinculado a um Google Docs: reaproveita os trechos do áudio anterior
+   * (`prevChunks`) e avisa quando o áudio novo fica pronto, com os trechos usados.
+   */
+  doc?: {
+    prevChunks: string[] | null;
+    fresh?: boolean;
+    tag?: string;
+    onReady?: (uri: string, chunks: string[]) => void | Promise<void>;
+  };
 }
 
 interface ReadAloudState {
@@ -301,16 +311,39 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
         void startReadAloudKeepAlive();
       }
       try {
+        let docChunks: string[] = [];
         const uri = await prepareReadAloudAudio(t, {
           geminiVoiceName: opts.geminiVoiceName,
           paused: opts.paused,
           signal,
+          ...(opts.doc
+            ? {
+                tag: opts.doc.tag,
+                title,
+                doc: {
+                  prevChunks: opts.doc.prevChunks,
+                  fresh: opts.doc.fresh,
+                  onChunks: (c: string[]) => {
+                    docChunks = c;
+                  },
+                },
+              }
+            : {}),
           // Progresso segue a GERAÇÃO (myAbort), não o player: tocar outro
           // arquivo no meio não apaga nem interrompe o andamento.
           onProgress: (done, total) => {
             if (genAbort === myAbort) set({ gen: { done, total } });
           },
         });
+        // Texto vinculado: guarda o áudio novo no texto salvo mesmo que a pessoa
+        // tenha tocado outra coisa no meio (aí ele só não toca agora).
+        if (uri && opts.doc?.onReady) {
+          try {
+            await opts.doc.onReady(uri, docChunks);
+          } catch {
+            /* o áudio fica em disco; a próxima vez acerta o vínculo */
+          }
+        }
         if (genAbort === myAbort) genAbort = null;
         // Só limpa o progresso/recursos se nenhuma geração mais nova assumiu.
         if (!genAbort) set({ gen: null });

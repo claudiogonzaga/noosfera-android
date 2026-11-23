@@ -841,6 +841,18 @@ async function cleanupReadAloudCache(keep = 6): Promise<void> {
   }
 }
 
+/** O que acompanha um pedido de áudio completo. */
+export type ReadAloudMeta = {
+    tag?: string;
+    title?: string;
+    /** Guarda os trechos prontos (texto vinculado a um Google Docs): a próxima versão do documento só gera o que mudou. */
+    keepChunks?: boolean;
+    /** Gera tudo de novo, sem reaproveitar trecho nem áudio guardado. */
+    fresh?: boolean;
+    /** Trechos da versão anterior do texto, para apagar os que não servem mais. */
+    dropChunks?: string[];
+  };
+
 /**
  * Sintetiza o texto INTEIRO (recebido já fatiado em `chunks`) e concatena o
  * PCM de todos os trechos num ÚNICO arquivo WAV salvo em disco (persistente).
@@ -854,7 +866,7 @@ export async function synthesizeFullSpeechGemini(
   onProgress?: (done: number, total: number) => void,
   signal?: TtsSignal,
   /** Para o áudio achar o seu texto se o app fechar no meio (ex.: "text:12"). */
-  meta: { tag?: string; title?: string } = {},
+  meta: ReadAloudMeta = {},
 ): Promise<GeminiTTSResult> {
   const clean = chunks.map((c) => c.trim()).filter(Boolean);
   if (clean.length === 0) throw new GeminiTTSError('texto vazio');
@@ -866,7 +878,12 @@ export async function synthesizeFullSpeechGemini(
   const cacheKey = shortHash(`${activeTtsModel}|${voiceName}:full:${clean.join('')}`);
   const file = new File(Paths.document, `readaloud_${cacheKey}.wav`);
   if (file.exists) {
-    return { uri: file.uri, cached: true };
+    if (!meta.fresh) return { uri: file.uri, cached: true };
+    try {
+      file.delete();
+    } catch {
+      /* será sobrescrito */
+    }
   }
 
   // No Android, o serviço nativo gera e monta o áudio: segue com a tela apagada e
@@ -895,6 +912,13 @@ export async function synthesizeFullSpeechGemini(
     );
     chunkFiles.push(chunkFile);
     let pcm: Uint8Array | null = null;
+    if (meta.fresh && chunkFile.exists) {
+      try {
+        chunkFile.delete();
+      } catch {
+        /* ignore */
+      }
+    }
     if (chunkFile.exists) {
       try {
         const bytes = await chunkFile.bytes();
@@ -963,8 +987,19 @@ export async function synthesizeFullSpeechGemini(
     }
     throw new GeminiTTSError('não consegui gravar o áudio completo (espaço em disco?)');
   }
-  // O WAV completo já tem tudo: os trechos avulsos não servem mais.
-  for (const f of chunkFiles) {
+  // O WAV completo já tem tudo: os trechos avulsos não servem mais — a não ser
+  // num texto vinculado a um Google Docs, que os reaproveita na próxima versão.
+  const current = new Set(chunkFiles.map((f) => f.name));
+  const stale = (meta.dropChunks ?? [])
+    .map(
+      (c) =>
+        new File(
+          Paths.cache,
+          `readaloud_chunk_${shortHash(`${activeTtsModel}|${voiceName}:chunk:${c.trim()}`)}.pcm`,
+        ),
+    )
+    .filter((f) => !current.has(f.name));
+  for (const f of [...(meta.keepChunks ? [] : chunkFiles), ...stale]) {
     try {
       if (f.exists) f.delete();
     } catch {
@@ -999,7 +1034,7 @@ async function synthesizeFullNative(
   id: string,
   onProgress?: (done: number, total: number) => void,
   signal?: TtsSignal,
-  meta: { tag?: string; title?: string } = {},
+  meta: ReadAloudMeta = {},
 ): Promise<GeminiTTSResult> {
   const native = ReadAloudAudio!;
   const model = effectiveModel();
@@ -1027,6 +1062,9 @@ async function synthesizeFullNative(
       workDir: `${fsPath(Paths.cache.uri).replace(/\/$/, '')}/readaloud`,
       tag: meta.tag ?? '',
       title: meta.title ?? '',
+      keepChunks: !!meta.keepChunks,
+      fresh: !!meta.fresh,
+      dropChunks: meta.dropChunks ?? [],
     });
   }
   awaitingJobs.add(id);

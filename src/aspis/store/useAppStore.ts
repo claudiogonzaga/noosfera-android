@@ -285,7 +285,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // falha de rede/escopo não quebra o app.
   refreshChannel: async () => {
     try {
-      const token = await getAccessToken();
+      const token = await getAccessToken('youtube');
       const ch = await getMyChannel(token);
       if (ch) {
         set({ channel: ch });

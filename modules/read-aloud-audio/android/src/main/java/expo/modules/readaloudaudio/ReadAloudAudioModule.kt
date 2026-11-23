@@ -47,6 +47,9 @@ class ReadAloudAudioModule : Module() {
           workDir = str("workDir"),
           tag = (spec["tag"] as? String) ?: "",
           title = (spec["title"] as? String) ?: "",
+          keepChunks = spec["keepChunks"] as? Boolean ?: false,
+          fresh = spec["fresh"] as? Boolean ?: false,
+          dropChunks = (spec["dropChunks"] as? List<Any?>)?.mapNotNull { it as? String } ?: emptyList(),
         ),
       )
     }

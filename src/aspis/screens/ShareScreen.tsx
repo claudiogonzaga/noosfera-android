@@ -98,7 +98,7 @@ export function ShareScreen({ route, navigation }: Props) {
       };
       if (user) {
         try {
-          const token = await getAccessToken();
+          const token = await getAccessToken('youtube');
           const details = await getVideoDetails(token, videoId);
           if (details) meta = { ...details, channel_thumb: meta.channel_thumb };
         } catch {

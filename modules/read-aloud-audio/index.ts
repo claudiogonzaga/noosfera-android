@@ -35,6 +35,12 @@ export interface ReadAloudJobSpec {
   /** Liga o resultado a algo do app (ex.: "text:12", um texto salvo). */
   tag?: string;
   title?: string;
+  /** Guarda os trechos prontos depois de montar o áudio (texto vinculado a um Google Docs). */
+  keepChunks?: boolean;
+  /** Gera tudo de novo: apaga antes os trechos guardados deste texto. */
+  fresh?: boolean;
+  /** Trechos de uma versão anterior do texto que não servem mais. */
+  dropChunks?: string[];
 }
 
 interface ReadAloudAudioNative {

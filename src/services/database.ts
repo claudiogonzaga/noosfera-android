@@ -21,6 +21,7 @@ import type {
   Nudge,
   NudgeType,
   ReadAloudText,
+  ReadAloudDocAudio,
   SnoozeFeedback,
   Streak,
   Tone,
@@ -886,6 +887,14 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   }
   if (!raCols.some((c) => c.name === 'audio_voice')) {
     await database.execAsync(`ALTER TABLE read_aloud_texts ADD COLUMN audio_voice TEXT`);
+  }
+  // v1.136: texto vinculado a um Google Docs — o id do documento, a data da
+  // última alteração conferida e os trechos do áudio guardado (para só gerar de
+  // novo o que mudou).
+  for (const col of ['doc_id', 'doc_modified', 'doc_chunks']) {
+    if (!raCols.some((c) => c.name === col)) {
+      await database.execAsync(`ALTER TABLE read_aloud_texts ADD COLUMN ${col} TEXT`);
+    }
   }
 
   // v1.23: dias da semana por lembrete (medications). Permite lembretes
@@ -2421,6 +2430,9 @@ interface ReadAloudTextRow {
   content: string;
   audio_uri: string | null;
   audio_voice: string | null;
+  doc_id?: string | null;
+  doc_modified?: string | null;
+  doc_chunks?: string | null;
   updated_at: string;
 }
 
@@ -2430,8 +2442,55 @@ const rowToReadAloudText = (r: ReadAloudTextRow): ReadAloudText => ({
   content: r.content,
   audioUri: r.audio_uri ?? null,
   audioVoice: r.audio_voice ?? null,
+  docId: r.doc_id ?? null,
+  docModified: r.doc_modified ?? null,
+  docAudio: parseDocAudio(r.doc_chunks),
   updatedAt: r.updated_at,
 });
+
+function parseDocAudio(raw: string | null | undefined): ReadAloudDocAudio | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as ReadAloudDocAudio;
+    return Array.isArray(v?.chunks) && typeof v.key === 'string' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Vincula um texto salvo a um Google Docs (ou atualiza o vínculo). */
+export async function setReadAloudTextDoc(
+  id: number,
+  fields: { docId?: string; content?: string; docModified?: string | null; docAudio?: ReadAloudDocAudio | null },
+): Promise<void> {
+  const d = await getDb();
+  const sets: string[] = [];
+  const args: (string | number | null)[] = [];
+  if (fields.docId !== undefined) {
+    sets.push('doc_id = ?');
+    args.push(fields.docId);
+  }
+  if (fields.content !== undefined) {
+    sets.push('content = ?');
+    args.push(fields.content);
+  }
+  if (fields.docModified !== undefined) {
+    sets.push('doc_modified = ?');
+    args.push(fields.docModified);
+  }
+  if (fields.docAudio !== undefined) {
+    sets.push('doc_chunks = ?');
+    args.push(fields.docAudio ? JSON.stringify(fields.docAudio) : null);
+  }
+  if (sets.length === 0) return;
+  await d.runAsync(`UPDATE read_aloud_texts SET ${sets.join(', ')} WHERE id = ?`, [...args, id]);
+}
+
+export async function getReadAloudText(id: number): Promise<ReadAloudText | null> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<ReadAloudTextRow>('SELECT * FROM read_aloud_texts WHERE id = ?', [id]);
+  return row ? rowToReadAloudText(row) : null;
+}
 
 /** URIs dos áudios guardados pelos textos salvos — protegidos da limpeza. */
 export async function getSavedAudioUris(): Promise<string[]> {

@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.googletoken'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.googletoken"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // GoogleAuthUtil: o token de acesso de UM grupo de escopos por vez (a mesma
+  // versão que o @react-native-google-signin usa).
+  implementation "com.google.android.gms:play-services-auth:21.4.0"
+}

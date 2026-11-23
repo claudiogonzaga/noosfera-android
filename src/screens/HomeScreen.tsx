@@ -1,44 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  Animated,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Owl } from '../components/Owl';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import Svg, { Circle } from 'react-native-svg';
+import { Simbolo } from '../components/Simbolo';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { HealthCard } from '../components/HealthCard';
 import { GreekIcon } from '../components/GreekIcon';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
-import {
-  getDashboardData,
-  markSleepDone,
-  rearmSleepReminders,
-  rescheduleAllNotifications,
-} from '../services/coach';
-import { useAppStore } from '../store/useAppStore';
-import {
-  setSpokenVolume,
-  setSpokenHeadphonesOnly,
-  isHeadphonesConnected,
-} from '../services/spokenNudges';
-import { VerticalVolume } from '../components/VerticalVolume';
+import { getDashboardData, markSleepDone, rearmSleepReminders } from '../services/coach';
 import { SequenceCard } from '../components/SequenceCard';
 import { InspirationHomeCard } from '../components/InspirationHomeCard';
-import { AspisHomeCard } from '../aspis/components/AspisHomeCard';
 import { HabitsTodaySection } from '../components/HabitsTodaySection';
 import { useSnackbar } from '../components/Snackbar';
 import { checkExerciseEvidence } from '../services/exerciseDetection';
-import type { OwlMood } from '../types';
 import { cancelSleepEscalationReminders } from '../services/notifications';
 import { checkForUpdate, type UpdateInfo } from '../services/updateChecker';
+import { dayKey, useKinesis } from '../kinesis/store';
+import { PHASE_LABEL, fmtTime, remainingSeconds, type TimerState } from '../kinesis/timer';
+import { useZazen } from '../zazen/store';
+
+// A aba ARETÉ (v1.134): o painel "Hoje". Um hábito de cada vez no cartão
+// "Agora", os três módulos de saúde à mão (Zazen, Kinesis, sono) e as correntes
+// da semana como contas num fio. A Comentora que conversa (chat e voz) saiu da
+// tela por enquanto, a pedido (16/11/2026): ficam os avisos.
 
 interface Dashboard {
   config: { bedtime: string; name: string | null };
@@ -51,138 +37,90 @@ function formatCountdown(mins: number): { value: string; unit: string } {
   if (mins < 0) {
     const late = Math.abs(mins);
     if (late < 60) return { value: `${late}`, unit: 'min atrasado' };
-    return { value: `${Math.floor(late / 60)}h${late % 60}`, unit: 'atrasado' };
+    return { value: `${Math.floor(late / 60)}h${String(late % 60).padStart(2, '0')}`, unit: 'atrasado' };
   }
   if (mins < 60) return { value: `${mins}`, unit: 'min até dormir' };
   return { value: `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}`, unit: 'até dormir' };
 }
 
-/** Remove emojis coloridos do texto da notificação para manter a estética. */
-function stripEmoji(s: string): string {
-  return s
-    .replace(
-      /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}]/gu,
-      '',
-    )
-    .replace(/\s+/g, ' ')
-    .trim();
+
+/** As contas dos últimos 7 dias de um módulo que ainda não é hábito: feito ou vazio, hoje em aberto. */
+function beadsOf(done: (day: string) => boolean): string {
+  let out = '';
+  for (let i = 6; i >= 0; i--) {
+    const ok = done(dayKey(Date.now() - i * 86_400_000));
+    out += ok ? 'F' : i === 0 ? 'H' : 'N';
+  }
+  return out;
 }
 
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
-  const diffMin = Math.round((Date.now() - then) / 60000);
-  if (!Number.isFinite(diffMin)) return '';
-  if (diffMin < 1) return 'agora mesmo';
-  if (diffMin < 60) return `há ${diffMin} min`;
-  const diffH = Math.round(diffMin / 60);
-  if (diffH < 24) return `há ${diffH}h`;
-  const diffD = Math.round(diffH / 24);
-  return `há ${diffD}d`;
+function DayRing({ done, total }: { done: number; total: number }) {
+  const size = 54;
+  const sw = 5;
+  const r = (size - sw) / 2;
+  const c = 2 * Math.PI * r;
+  const v = total > 0 ? Math.min(1, done / total) : 0;
+  return (
+    <View style={{ width: size, height: size }} accessible accessibilityLabel={`${done} de ${total} hábitos feitos hoje`}>
+      <Svg width={size} height={size}>
+        <Circle cx={size / 2} cy={size / 2} r={r} stroke={colors.bg.surfaceStrong} strokeWidth={sw} fill="none" />
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={v >= 1 ? colors.accent.success : colors.accent.gold}
+          strokeWidth={sw}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${c * v} ${c}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
+        <Text style={styles.ringText}>
+          {done}/{total}
+        </Text>
+      </View>
+    </View>
+  );
 }
 
-function moodForState(d: Dashboard | null): OwlMood {
-  if (!d) return 'calm';
-  if (d.todayLog?.completed) return 'sleeping';
-  if (d.minutesToBedtime !== null && d.minutesToBedtime < -30) return 'serious';
-  if (d.minutesToBedtime !== null && d.minutesToBedtime < 0) return 'worried';
-  return 'calm';
+function Tile({ label, value, unit, onPress, on }: { label: string; value: string; unit: string; onPress: () => void; on?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.tile, on && styles.tileOn, pressed && { opacity: 0.85 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value} ${unit}`}
+    >
+      <Text style={styles.tileLabel}>{label}</Text>
+      <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={styles.tileUnit} numberOfLines={1}>
+        {unit}
+      </Text>
+    </Pressable>
+  );
 }
 
 export function HomeScreen() {
   const navigation = useNavigation<any>();
-  const { config: storeConfig, setConfig } = useAppStore();
-  // Volume dos avisos/nudges (0–1). `volLive` reflete o arraste em tempo real.
-  const [volLive, setVolLive] = useState<number | null>(null);
-  const liveVol = volLive ?? storeConfig?.nudgeVolume ?? 1;
-
-  // Persiste o volume ao soltar a barra: salva, espelha no nativo e — só quando
-  // cruza a fronteira do mudo — reagenda tudo p/ trocar o canal (silencioso/com som).
-  const commitVolume = useCallback(
-    async (v: number) => {
-      const silentNext = v <= 0;
-      const silentPrev = storeConfig?.silentMode ?? false;
-      try {
-        await setConfig({ nudgeVolume: v, silentMode: silentNext });
-        setSpokenVolume(v);
-        if (silentNext !== silentPrev) await rescheduleAllNotifications();
-      } catch (err) {
-        console.warn('commitVolume failed:', err);
-      } finally {
-        setVolLive(null);
-      }
-    },
-    [storeConfig?.silentMode, setConfig],
-  );
-
-  // "Só com fone": meio-termo entre o volume normal e o mudo — os avisos
-  // continuam falando, mas só quando houver fone conectado. É a MESMA
-  // configuração de "Sons e Voz"; aqui ela fica à mão, junto do volume.
-  const headphonesOnly = storeConfig?.spokenHeadphonesOnly ?? false;
-
-  // O aviso do modo fone é PASSAGEIRO: explica a mudança no instante em que ela
-  // acontece e some. Quem indica o estado de forma permanente é o próprio botão
-  // (dourado quando ligado) — deixar o texto fixo só roubava a tela.
-  const [foneHint, setFoneHint] = useState<string | null>(null);
-  const foneHintOpacity = useRef(new Animated.Value(0)).current;
-  const foneHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showFoneHint = useCallback(
-    (msg: string) => {
-      if (foneHintTimer.current) clearTimeout(foneHintTimer.current);
-      setFoneHint(msg);
-      foneHintOpacity.setValue(1);
-      foneHintTimer.current = setTimeout(() => {
-        Animated.timing(foneHintOpacity, {
-          toValue: 0,
-          duration: 400,
-          useNativeDriver: true,
-        }).start(({ finished }) => {
-          if (finished) setFoneHint(null);
-        });
-      }, 4500);
-    },
-    [foneHintOpacity],
-  );
-
-  // Sem isto, alternar e sair da tela deixaria o timer disparando num
-  // componente já desmontado.
-  useEffect(
-    () => () => {
-      if (foneHintTimer.current) clearTimeout(foneHintTimer.current);
-    },
-    [],
-  );
-
-  const toggleHeadphonesOnly = useCallback(async () => {
-    const next = !headphonesOnly;
-    try {
-      await setConfig({ spokenHeadphonesOnly: next });
-      setSpokenHeadphonesOnly(next); // espelha pro nativo, que lê no disparo
-      showFoneHint(
-        next
-          ? 'Só com fone: os avisos só falam se houver fone conectado.'
-          : 'Som normal: os avisos voltam a falar pelo alto-falante.',
-      );
-      if (next && !isHeadphonesConnected()) {
-        Alert.alert(
-          'Sem fone agora',
-          'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, a Comentora volta a falar — pelo fone.',
-        );
-      }
-    } catch (err) {
-      console.warn('toggle headphones-only failed:', err);
-    }
-  }, [headphonesOnly, setConfig, showFoneHint]);
-
+  const focused = useIsFocused();
   const [data, setData] = useState<Dashboard | null>(null);
   const [marking, setMarking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   // A seção de hábitos relê junto com a Home (foco e a cada 30 s).
   const [habitsKey, setHabitsKey] = useState(0);
-  // Dia perfeito (todos os hábitos em formação feitos): a coruja comemora.
-  const [perfectDay, setPerfectDay] = useState(false);
-  // O aviso curto do pé da tela ("Feito: … · Desfazer").
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  // Muda a cada hábito marcado e a cada volta à tela: Atena olha e pisca.
+  const [olharKey, setOlharKey] = useState(0);
   const snackbar = useSnackbar();
+
+  const zazenDias = useZazen((s) => s.dias);
+  const zazenSessao = useZazen((s) => s.sessao);
+  const kinHistory = useKinesis((s) => s.history);
+  const kinTimer = useKinesis((s) => s.timer);
 
   useEffect(() => {
     // Throttled background check (only fires if 6h+ since last check).
@@ -208,14 +146,11 @@ export function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       reload();
+      setOlharKey((k) => k + 1);
       const interval = setInterval(reload, 30_000);
       return () => clearInterval(interval);
     }, [reload]),
   );
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
 
   const handleMarkDone = async () => {
     if (!data?.sleepHabit) return;
@@ -233,12 +168,13 @@ export function HomeScreen() {
     }
   };
 
-  // A coruja: dormindo depois de "Vou dormir agora"; comemorando no dia
-  // perfeito; senão, o humor da hora de dormir.
-  const mood: OwlMood = data?.todayLog?.completed ? 'sleeping' : perfectDay ? 'celebrating' : moodForState(data);
-  const countdown = data?.minutesToBedtime !== null && data?.minutesToBedtime !== undefined
-    ? formatCountdown(data.minutesToBedtime)
-    : null;
+  const onProgress = useCallback((done: number, total: number) => setProgress({ done, total }), []);
+  const onMarked = useCallback(() => setOlharKey((k) => k + 1), []);
+
+  const asleep = !!data?.todayLog?.completed;
+  const countdown =
+    data?.minutesToBedtime !== null && data?.minutesToBedtime !== undefined ? formatCountdown(data.minutesToBedtime) : null;
+  const late = data?.minutesToBedtime != null && data.minutesToBedtime < 0;
   const greeting = (() => {
     const h = new Date().getHours();
     if (h < 6) return 'Boa madrugada';
@@ -246,6 +182,53 @@ export function HomeScreen() {
     if (h < 18) return 'Boa tarde';
     return 'Boa noite';
   })();
+  const dateLine = new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' });
+
+  // Zazen e Kinesis: os números de hoje e as contas da semana (ainda sem escudo:
+  // viram hábitos de verdade, com fonte automática, na próxima etapa).
+  const today = dayKey();
+  const zazenMin = Math.round(zazenDias[today] ?? 0);
+  const kinByDay = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const h of kinHistory) m[h.date] = (m[h.date] ?? 0) + 1;
+    return m;
+  }, [kinHistory]);
+  const kinToday = kinByDay[today] ?? 0;
+  const kinRunning = !!kinTimer?.running;
+  const goZazen = () => navigation.navigate('Main', { screen: 'Zazen' });
+  const goKinesis = () => navigation.navigate('Main', { screen: 'Kinesis' });
+  const extraChains = [
+    {
+      key: 'zazen',
+      title: 'Zazen',
+      beads: beadsOf((d) => (zazenDias[d] ?? 0) > 0),
+      note: zazenMin > 0 ? `${zazenMin} min hoje` : 'hoje ainda não',
+      onPress: goZazen,
+    },
+    {
+      key: 'kinesis',
+      title: 'Kinesis',
+      beads: beadsOf((d) => (kinByDay[d] ?? 0) > 0),
+      note: kinToday > 0 ? `${kinToday} ${kinToday === 1 ? 'pausa' : 'pausas'} hoje` : kinRunning ? 'rodando' : 'hoje ainda não',
+      onPress: goKinesis,
+    },
+  ];
+
+  const sleepTile = asleep ? (
+    <Tile label="SONO" value="Boa noite" unit="até amanhã" onPress={() => {}} on />
+  ) : (
+    <Tile
+      label="SONO"
+      value={countdown?.value ?? data?.config.bedtime ?? '—'}
+      unit={countdown?.unit ?? 'hora de dormir'}
+      onPress={() =>
+        Alert.alert('Vou dormir agora', 'Marco que você foi dormir e paro os avisos desta noite.', [
+          { text: 'Ainda não', style: 'cancel' },
+          { text: 'Vou dormir', onPress: () => void handleMarkDone() },
+        ])
+      }
+    />
+  );
 
   return (
     <ScreenContainer edges={['bottom']}>
@@ -264,163 +247,81 @@ export function HomeScreen() {
             </Text>
           </Pressable>
         )}
+
+        {kinRunning && kinTimer && <KinesisFaixa timer={kinTimer} ativo={focused} onPress={goKinesis} />}
+
         <View style={styles.header}>
-          <Text style={[typography.body, { color: colors.text.secondary }]}>
-            {greeting}{data?.config.name ? `, ${data.config.name}` : ''}
-          </Text>
-          <View style={styles.headerRight}>
-            <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
-              <GreekIcon name="settings" size={24} color={colors.text.secondary} />
-            </Pressable>
-            {/* Barra de volume dos avisos/nudges — desce até mudo. */}
-            <View style={styles.volWrap}>
-              <GreekIcon
-                name={liveVol <= 0 ? 'mute' : 'sound'}
-                size={16}
-                color={liveVol <= 0 ? colors.text.tertiary : colors.text.secondary}
-              />
-              <VerticalVolume
-                value={liveVol}
-                height={84}
-                onChange={(v) => {
-                  setVolLive(v);
-                  setSpokenVolume(v); // nativo já passa a usar no próximo aviso
-                }}
-                onCommit={commitVolume}
-              />
-              {/* Logo abaixo da barra: restringe a voz ao fone, sem precisar
-                  zerar o volume. Ligado = dourado. */}
-              <Pressable
-                onPress={toggleHeadphonesOnly}
-                hitSlop={10}
-                accessibilityRole="switch"
-                accessibilityState={{ checked: headphonesOnly }}
-                accessibilityLabel="Falar somente com fone de ouvido"
-                style={[styles.foneBtn, headphonesOnly && styles.foneBtnOn]}
-              >
-                <GreekIcon
-                  name="headphones"
-                  size={16}
-                  color={headphonesOnly ? colors.text.onGold : colors.text.tertiary}
-                />
-              </Pressable>
-            </View>
+          <Pressable onPress={() => setOlharKey((k) => k + 1)} accessibilityLabel="Símbolo da Areté">
+            <Simbolo size={84} dormindo={asleep} olharKey={olharKey} animated={focused} />
+          </Pressable>
+          <View style={styles.headerText}>
+            <Text style={styles.greeting} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {greeting}
+              {data?.config.name ? `,\n${data.config.name}` : ''}
+            </Text>
+            <Text style={styles.dateLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {dateLine}
+            </Text>
           </View>
-        </View>
-        {liveVol <= 0 && (
-          <Text style={styles.silentHint}>
-            Silencioso: avisos só em texto (sem piado nem voz). Arraste a barrinha
-            para cima para reativar o som.
-          </Text>
-        )}
-        {foneHint && (
-          <Animated.Text style={[styles.silentHint, { opacity: foneHintOpacity }]}>
-            {foneHint}
-          </Animated.Text>
-        )}
-
-        <View style={styles.owlWrap}>
-          <Owl mood={mood} size={180} />
+          {progress.total > 0 && <DayRing done={progress.done} total={progress.total} />}
+          <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10} accessibilityLabel="Configurações" style={styles.gear}>
+            <GreekIcon name="settings" size={22} color={colors.text.secondary} />
+          </Pressable>
         </View>
 
-        {/* HÁBITOS (v1.130): o que é para hoje, logo abaixo da coruja. Substitui o
-            antigo cartão "Hábitos saudáveis e lembretes" e os dois cartões de
-            último/próximo lembrete — a seção já traz os hábitos do dia e, separados,
-            os lembretes (remédios, suplementos, jejum). O resto da Home segue abaixo. */}
-        <HabitsTodaySection refreshKey={habitsKey} snack={snackbar.show} onPerfectDay={setPerfectDay} />
-
-        {data?.todayLog?.completed ? (
-          <Card style={styles.bigCard}>
-            <View style={styles.centerRow}>
-              <GreekIcon name="moon" size={22} color={colors.accent.gold} />
-              <Text style={[typography.subtitle, { color: colors.accent.gold, marginLeft: spacing.sm }]}>
-                Boa noite!
-              </Text>
-            </View>
-            <Text style={[typography.body, styles.cardBody]}>
-              Você marcou que dormiu hoje. Vai bem, descanse fundo. A gente se vê amanhã.
-            </Text>
-          </Card>
-        ) : countdown ? (
-          <Card style={styles.bigCard}>
-            <Text style={[typography.label, styles.label]}>
-              {data?.minutesToBedtime !== null && data!.minutesToBedtime < 0 ? 'HORA DE DORMIR · ATRASADO' : 'HORA DE DORMIR'}
-            </Text>
-            <View style={styles.countdownRow}>
-              <Text
-                style={[
-                  styles.countdownValue,
-                  data?.minutesToBedtime !== null && data!.minutesToBedtime < 0 && {
-                    color: colors.accent.warning,
-                  },
-                ]}
-              >
-                {countdown.value}
-              </Text>
-              <Text style={[typography.body, { color: colors.text.secondary, marginLeft: spacing.sm }]}>
-                {countdown.unit}
-              </Text>
-            </View>
-            <Text style={[typography.small, { color: colors.text.tertiary, textAlign: 'center' }]}>
-              horário-alvo: {data?.config.bedtime}
-            </Text>
-          </Card>
-        ) : null}
-
-        {/* Painel de INSPIRAÇÃO (separado do de lembretes). */}
-        <InspirationHomeCard />
-
-        {/* O Aspis (o escudo): só o melhor de hoje; o resto mora na seção dele. */}
-        <AspisHomeCard />
-
-        <HealthCard />
-
-        <View style={styles.actions}>
-          {/* A Comentora conduz: abre o chat já comentando saúde/hábitos do dia. */}
-          <Button
-            label="Chat com Comentora"
-            onPress={() => navigation.navigate('Chat')}
-          />
-          {!data?.todayLog?.completed && (
-            <>
-              <View style={{ height: spacing.sm }} />
-              <Button
-                label="Exercício de respiração"
-                variant="secondary"
-                onPress={() => navigation.navigate('Breathing')}
+        <HabitsTodaySection
+          refreshKey={habitsKey}
+          snack={snackbar.show}
+          onProgress={onProgress}
+          onMarked={onMarked}
+          extraChains={extraChains}
+          slot={
+            <View style={styles.tiles}>
+              <Tile
+                label="ZAZEN"
+                value={zazenSessao ? 'sentado' : `${zazenMin}`}
+                unit={zazenSessao ? 'agora' : 'min hoje'}
+                onPress={goZazen}
+                on={zazenMin > 0}
               />
-              <View style={{ height: spacing.sm }} />
-              <Button
-                label="Vou dormir agora"
-                variant="secondary"
-                onPress={handleMarkDone}
-                loading={marking}
+              <Tile
+                label="KINESIS"
+                value={kinRunning ? 'ligado' : `${kinToday}`}
+                unit={kinRunning ? `${kinToday} ${kinToday === 1 ? 'pausa' : 'pausas'}` : kinToday === 1 ? 'pausa hoje' : 'pausas'}
+                onPress={goKinesis}
+                on={kinToday > 0}
               />
-            </>
+              {sleepTile}
+            </View>
+          }
+        />
+
+        <Text style={styles.section}>FERRAMENTAS</Text>
+        <View style={styles.tools}>
+          <View style={styles.tool}>
+            <Button label="Respiração" variant="secondary" onPress={() => navigation.navigate('Breathing')} />
+          </View>
+          <View style={styles.tool}>
+            <Button label="Ioga Nidra" variant="secondary" onPress={() => navigation.navigate('YogaNidra')} />
+          </View>
+          <View style={styles.tool}>
+            <Button label="Leia para mim" variant="secondary" onPress={() => navigation.navigate('ReadAloud')} />
+          </View>
+          {!asleep && (
+            <View style={styles.tool}>
+              <Button label="Vou dormir agora" variant="secondary" onPress={handleMarkDone} loading={marking} />
+            </View>
           )}
-        </View>
-
-        <View style={styles.secondaryActions}>
-          <Button
-            label="Leia para mim"
-            variant="secondary"
-            onPress={() => navigation.navigate('ReadAloud')}
-          />
-          <View style={{ height: spacing.sm }} />
-          <Button
-            label="Ioga Nidra"
-            variant="secondary"
-            onPress={() => navigation.navigate('YogaNidra')}
-          />
         </View>
 
         {/* Playlist: tocar respiração + ioga nidra + leia para mim em sequência. */}
         <SequenceCard />
 
+        <InspirationHomeCard />
+        <HealthCard />
+
         <Pressable onPress={() => navigation.navigate('History')} style={styles.historyLink}>
-          <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>
-            Ver estatísticas →
-          </Text>
+          <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>Ver estatísticas →</Text>
         </Pressable>
       </ScrollView>
       {/* "Feito: … · Desfazer" — fica no pé da tela, por cima do que rola. */}
@@ -429,104 +330,95 @@ export function HomeScreen() {
   );
 }
 
+/** O Kinesis ligado, à vista no alto da Areté (pedido de 16/11/2026): a fase,
+ *  o tempo que falta e a série; um toque abre o Kinesis. */
+function KinesisFaixa({ timer, ativo, onPress }: { timer: TimerState; ativo: boolean; onPress: () => void }) {
+  const [, setBatida] = useState(0);
+  useEffect(() => {
+    if (!ativo) return;
+    const id = setInterval(() => {
+      useKinesis.getState().tick(); // põe o timer em dia: as fases mudam mesmo fora da aba dele
+      setBatida((n) => n + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [ativo]);
+  const chamando = timer.phase === 'rest' || timer.phase === 'snooze';
+  const fase = timer.paused ? 'pausado' : timer.phase === 'work' ? 'trabalhando' : PHASE_LABEL[timer.phase].toLocaleLowerCase('pt-BR');
+  const falta = timer.paused ? timer.pauseRemainingMs / 1000 : remainingSeconds(timer, Date.now());
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.kinFaixa, chamando && styles.kinFaixaChamando]}
+      accessibilityRole="button"
+      accessibilityLabel={`Kinesis ligado, ${fase}, faltam ${fmtTime(falta)}`}
+    >
+      <View style={[styles.kinPonto, chamando && { backgroundColor: colors.accent.gold }]} />
+      <Text style={styles.kinRotulo}>KINESIS</Text>
+      <Text style={styles.kinFase} numberOfLines={1}>
+        {fase} · {timer.currentSet}/{timer.config.sets}
+      </Text>
+      <Text style={styles.kinTempo}>{fmtTime(falta)}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: spacing.xl,
-    // Desce o conteúdo abaixo da faixa superior do meandro (greca), para a
-    // engrenagem/volume não ficarem sobrepostos à borda grega.
     paddingTop: spacing.xs,
     paddingBottom: spacing.xxl,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.md,
     paddingTop: spacing.md,
-  },
-  headerRight: {
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  volWrap: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  foneBtn: {
-    marginTop: 2,
-    padding: 5,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.bg.surfaceStrong,
-  },
-  foneBtnOn: {
-    backgroundColor: colors.accent.gold,
-    borderColor: colors.accent.gold,
-  },
-  silentHint: {
-    ...typography.small,
-    color: colors.accent.gold,
-    marginTop: spacing.sm,
-    lineHeight: 17,
-  },
-  owlWrap: {
-    alignItems: 'center',
-    marginVertical: spacing.lg,
-  },
-  centerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bigCard: {
     marginBottom: spacing.lg,
-    paddingVertical: spacing.xl,
   },
-  cardBody: {
-    color: colors.text.secondary,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1.8,
+  headerText: { flex: 1 },
+  greeting: { ...typography.subtitle, color: colors.text.primary },
+  dateLine: { ...typography.small, color: colors.text.secondary, marginTop: 1 },
+  gear: { alignSelf: 'flex-start', paddingTop: 2 },
+  ringText: { ...typography.label, fontSize: 13, letterSpacing: 0, color: colors.text.primary },
+  tiles: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
+  tile: {
+    flex: 1,
+    minHeight: 86,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.sm,
+    backgroundColor: colors.bg.surface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
-  checkboxDone: {
-    backgroundColor: colors.text.primary,
-    borderColor: colors.text.primary,
-  },
-  label: {
-    color: colors.text.tertiary,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  countdownRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'center',
-    marginBottom: spacing.sm,
-  },
-  countdownValue: {
-    ...typography.hero,
-    color: colors.accent.gold,
-    fontSize: 48,
-    lineHeight: 56,
-  },
-  actions: {
-    marginBottom: spacing.xl,
-  },
-  secondaryActions: {
-    marginBottom: spacing.sm,
-  },
+  tileOn: { borderColor: colors.accent.success },
+  tileLabel: { ...typography.label, fontSize: 11, color: colors.text.tertiary },
+  tileValue: { ...typography.title, fontSize: 22, lineHeight: 28, color: colors.text.primary, marginTop: 4 },
+  tileUnit: { ...typography.small, fontSize: 12, lineHeight: 16, color: colors.text.secondary },
+  section: { ...typography.label, color: colors.text.tertiary, marginTop: spacing.sm, marginBottom: spacing.sm },
+  tools: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
+  tool: { flexBasis: '47%', flexGrow: 1 },
   historyLink: {
     alignItems: 'center',
     paddingVertical: spacing.md,
   },
+  kinFaixa: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    minHeight: 44,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.accent.success,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  kinFaixaChamando: { borderColor: colors.accent.gold, backgroundColor: 'rgba(244,197,83,0.14)' },
+  kinPonto: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent.success },
+  kinRotulo: { ...typography.label, color: colors.text.secondary },
+  kinFase: { ...typography.small, color: colors.text.primary, flex: 1 },
+  kinTempo: { ...typography.bodyMedium, color: colors.text.primary, fontVariant: ['tabular-nums'] },
   updateBanner: {
     flexDirection: 'row',
     alignItems: 'center',

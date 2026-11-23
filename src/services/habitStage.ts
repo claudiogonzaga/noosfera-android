@@ -15,6 +15,7 @@
 //   quase      (≥ 80%, ou SRBAI ≥ 5 com força ≥ 65%) → só o aviso na hora
 //   formado    (graduado)     → silêncio; a cada 14 dias, as 4 perguntas
 
+import { AVISOS_CURTOS } from './avisoFlags';
 import { format } from 'date-fns';
 import { getHabitState, getKV, setHabitState, setKV } from './database';
 import { getMarksOf, getValuesOf, listSrbaiRows } from './habitDb';
@@ -170,6 +171,12 @@ const NONE: ReminderPlan = { pre: false, anchor: false, ask: false, maxChain: 0,
 
 /** O que agendar hoje para este hábito. `maxInsist` é o teto global (Lembretes). */
 export function reminderPlanOf(def: HabitDef, stats: HabitStats, maxInsist: number): ReminderPlan {
+  const p = fullPlanOf(def, stats, maxInsist);
+  // Avisos curtos (v1.135): só o aviso na hora; sem aviso antes, pergunta nem cobranças.
+  return AVISOS_CURTOS ? { ...p, pre: false, ask: false, maxChain: 0 } : p;
+}
+
+function fullPlanOf(def: HabitDef, stats: HabitStats, maxInsist: number): ReminderPlan {
   if (!def.enabled || def.archived) return NONE;
   const full: ReminderPlan = { pre: true, anchor: true, ask: maxInsist > 0, maxChain: maxInsist, srbaiCheck: false };
   if (def.reminders === 'nenhum') return { ...NONE, srbaiCheck: stats.formed && stats.srbaiDue };

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Noosfera",
     "slug": "comentor",
-    "version": "1.133.0",
+    "version": "1.136.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

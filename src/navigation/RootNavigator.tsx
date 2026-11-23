@@ -215,7 +215,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
               level: (data.level ?? 1) as IntensityLevel,
             });
           } else {
-            nav.navigate('Chat');
+            nav.navigate('Main', { screen: 'Home' }); // o chat está fora da tela (v1.134)
           }
           return;
         }
@@ -234,7 +234,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           return;
         }
         // Tap on the notification body.
-        nav.navigate('Chat');
+        nav.navigate('Main', { screen: 'Home' }); // o chat está fora da tela (v1.134)
       } else if (type === MORNING_TYPE) {
         // Check-in da manhã: Bem / Mal / texto. Só o toque no corpo abre o app.
         await handleMorningResponse(data, action, response.userText ?? undefined);

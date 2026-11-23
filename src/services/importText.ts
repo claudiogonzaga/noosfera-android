@@ -7,7 +7,33 @@ import { strFromU8, unzipSync } from 'fflate';
 
 import { getAccessToken, NotSignedInError } from '../aspis/services/auth';
 
+/** Falta conectar a conta Google à Noosfera: a tela oferece o login ali mesmo. */
+export class GoogleAccountNeeded extends Error {
+  constructor() {
+    super('Conecte a sua conta Google à Noosfera para ler o documento.');
+    this.name = 'GoogleAccountNeeded';
+  }
+}
+
 const GOOGLE_DOC = /docs\.google\.com\/document\/(?:u\/\d+\/)?d\/([A-Za-z0-9_-]{20,})/;
+
+// Um pedido de token por vez: a biblioteca do login do Google só acompanha UMA
+// chamada nativa de cada vez, e duas simultâneas (nome e texto do documento
+// pedidos juntos) derrubavam uma à outra — o que parecia "conta não conectada".
+let tokenFlight: Promise<string> | null = null;
+function driveToken(): Promise<string> {
+  if (!tokenFlight) {
+    tokenFlight = getAccessToken()
+      .catch((e) => {
+        if (e instanceof NotSignedInError) throw new GoogleAccountNeeded();
+        throw e;
+      })
+      .finally(() => {
+        tokenFlight = null;
+      });
+  }
+  return tokenFlight;
+}
 
 /** O id do documento, se o texto for (ou contiver só) um link do Google Docs. */
 export function googleDocId(text: string): string | null {
@@ -18,15 +44,7 @@ export function googleDocId(text: string): string | null {
 
 /** O texto do Google Docs, exportado pelo Drive. Lança Error com uma mensagem para a pessoa. */
 export async function fetchGoogleDocText(id: string): Promise<string> {
-  let token: string;
-  try {
-    token = await getAccessToken();
-  } catch (e) {
-    if (e instanceof NotSignedInError) {
-      throw new Error('Entre com a sua conta Google no Escudo para trazer documentos do Drive.');
-    }
-    throw e;
-  }
+  const token = await driveToken();
   const res = await fetch(
     `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}/export?mimeType=text%2Fplain`,
     { headers: { Authorization: `Bearer ${token}` } },
@@ -36,6 +54,24 @@ export async function fetchGoogleDocText(id: string): Promise<string> {
   }
   if (!res.ok) throw new Error(`O Drive não entregou o documento (HTTP ${res.status}).`);
   return tidy(await res.text());
+}
+
+/**
+ * O nome e a data da última alteração de um Google Docs — barato, para saber se
+ * o documento mudou sem baixar o texto. Lança Error com uma mensagem para a pessoa.
+ */
+export async function fetchGoogleDocInfo(id: string): Promise<{ name: string; modifiedTime: string }> {
+  const token = await driveToken();
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=name%2CmodifiedTime&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 404 || res.status === 403) {
+    throw new Error('A sua conta Google não abre esse documento (ele é seu ou foi compartilhado com você?).');
+  }
+  if (!res.ok) throw new Error(`O Drive não respondeu sobre o documento (HTTP ${res.status}).`);
+  const j = (await res.json()) as { name?: string; modifiedTime?: string };
+  return { name: j.name ?? '', modifiedTime: j.modifiedTime ?? '' };
 }
 
 /** O texto de um .docx: os parágrafos de word/document.xml, sem a formatação. */
