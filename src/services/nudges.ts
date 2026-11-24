@@ -1200,7 +1200,9 @@ export async function unconfirmNudge(nudgeType: string): Promise<void> {
     console.warn(`failed to mark nudge undone ${nudgeType}:`, err);
   }
   void recordHabitEvent(nudgeType, 'undone', { via: 'home' });
-  await scheduleAllNudges();
+  // Reagendar tudo leva segundos (cancela e refaz aviso a aviso): segue por trás,
+  // para o desmarcar aparecer na hora (pedido de 24/11/2026: "demora demais").
+  void scheduleAllNudges().catch(() => {});
 }
 
 /**

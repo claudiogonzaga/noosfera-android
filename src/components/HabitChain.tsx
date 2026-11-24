@@ -76,6 +76,25 @@ export function chainDoneToday(chain: HabitChain): HabitChain {
   };
 }
 
+/**
+ * O contrário de chainDoneToday: o elo de hoje desfeito na hora do toque
+ * (a releitura das contas acerta escudos e recorde logo depois).
+ */
+export function chainUndoneToday(chain: HabitChain): HabitChain {
+  if (chain.unit !== 'dia' || !chain.beads.endsWith('F')) return chain;
+  const { earnEvery } = CHAIN_RULES.dia;
+  const hadShieldNow = chain.length % earnEvery === 0 && chain.shields > 0;
+  const length = Math.max(0, chain.length - 1);
+  const shields = hadShieldNow ? chain.shields - 1 : chain.shields;
+  return {
+    ...chain,
+    length,
+    shields,
+    nextShieldIn: shields >= chain.cap ? null : earnEvery - (length % earnEvery),
+    beads: `${chain.beads.slice(0, -1)}H`,
+  };
+}
+
 // ————————————————— escudos —————————————————
 
 /** O escudo, sozinho (cheio = guardado; vazado = espaço livre). */

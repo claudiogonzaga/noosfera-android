@@ -68,7 +68,14 @@ export function TimerView() {
         <View style={styles.finishedBand}>
           <MeanderBar frac={1} color={K.ink} />
         </View>
-        <Text style={[styles.phase, { color: K.ink, fontSize: 34 }]}>{PHASE_LABEL.finished}</Text>
+        <Text style={[styles.phase, { color: K.ink, fontSize: 34 }]}>
+          {timer.abandoned ? 'PAROU' : PHASE_LABEL.finished}
+        </Text>
+        {timer.abandoned ? (
+          <Text style={[styles.finishedLink, { color: K.ink, textDecorationLine: 'none', textAlign: 'center' }]}>
+            3 horas sem exercício: o Kinesis parou sozinho.
+          </Text>
+        ) : null}
         <Pressable
           onPress={actions.start}
           accessibilityRole="button"

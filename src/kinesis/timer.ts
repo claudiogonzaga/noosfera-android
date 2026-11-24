@@ -73,6 +73,8 @@ export interface TimerState {
   overdueSince: number | null;
   overduePausedAt: number | null;
   roundSnoozed: boolean;
+  /** Parou sozinho: ABANDON_AFTER_MS sem exercício confirmado. */
+  abandoned?: boolean;
 }
 
 /** O que muda o estado e, às vezes, toca um som na hora (o toque já foi dado). */
@@ -92,6 +94,11 @@ const MIN_EXERCISE_WINDOW = 5;
 const PREV_RESTART_THRESHOLD = 2;
 /** No telefone o alerta para sozinho: esquecido na mesa, não toca a noite inteira. */
 const NAG_WINDOW_MIN = 30;
+/**
+ * Tanto tempo sem exercício confirmado (contado do primeiro atraso, sem as
+ * pausas) e a prática foi abandonada: o Kinesis para sozinho (pedido de 24/11/2026).
+ */
+export const ABANDON_AFTER_MS = 3 * 60 * 60 * 1000;
 /** Fase mais curta que isto não tem os bipes dos últimos 3 segundos. */
 const BEEPS_MIN_SECONDS = 4;
 
@@ -264,11 +271,16 @@ function clearRound(s: TimerState): TimerState {
     nextAlertAt: null,
     overdueSince: null,
     overduePausedAt: null,
+    abandoned: false,
   };
 }
 
 function finished(s: TimerState): TimerState {
   return { ...clearRound(s), running: false, paused: false, phase: 'finished', pauseRemainingMs: 0 };
+}
+
+function abandon(s: TimerState): TimerState {
+  return { ...finished(s), abandoned: true };
 }
 
 /**
@@ -281,6 +293,7 @@ export function advance(state: TimerState, now: number): TimerState {
   let s = state;
   // Com o limite bastam poucas voltas; a trava só protege de configuração absurda.
   for (let guard = 0; guard < 500; guard += 1) {
+    if (s.overdueSince && now >= s.overdueSince + ABANDON_AFTER_MS) return abandon(s);
     if (s.awaitingConfirm || now < s.phaseEndAt) return s;
     const end = s.phaseEndAt;
     if (s.phase === 'prepare') {
@@ -456,15 +469,28 @@ export function buildTimeline(s: TimerState, now: number): KinesisTimeline {
   if (!s.running || s.paused) return { current, events };
 
   const cfg = s.config;
-  const nag = (from: number): KinesisEvent => ({
-    at: Math.max(from, now + 1000),
-    sound: cfg.alertSound || 'alarm',
-    vibrate: true,
-    repeatMs: alertIntervalMs(cfg),
-    repeatLeft: Math.max(0, Math.ceil(NAG_WINDOW_MIN / Math.max(1, cfg.alertEvery || 2)) - 1),
+  // O fim por abandono: a notificação some e nada mais toca.
+  const quit = (overdueSince: number): KinesisEvent => ({
+    at: Math.max(overdueSince + ABANDON_AFTER_MS, now + 1000),
+    sound: null,
+    finish: true,
+    notif: { title: 'Kinesis parou', text: '3 horas sem exercício', chronoTo: 0, chronoDown: true },
   });
+  const nag = (from: number, overdueSince: number): KinesisEvent[] => {
+    const at = Math.max(from, now + 1000);
+    const every = alertIntervalMs(cfg);
+    const stopAt = overdueSince + ABANDON_AFTER_MS;
+    const left = Math.max(0, Math.ceil(NAG_WINDOW_MIN / Math.max(1, cfg.alertEvery || 2)) - 1);
+    const fits = Math.max(0, Math.ceil((stopAt - at) / every) - 1); // nenhum alarme depois da parada
+    const out: KinesisEvent[] = [];
+    if (at < stopAt) {
+      out.push({ at, sound: cfg.alertSound || 'alarm', vibrate: true, repeatMs: every, repeatLeft: Math.min(left, fits) });
+    }
+    out.push(quit(overdueSince));
+    return out;
+  };
   if (s.awaitingConfirm) {
-    events.push(nag(s.nextAlertAt ?? now + alertIntervalMs(cfg)));
+    events.push(...nag(s.nextAlertAt ?? now + alertIntervalMs(cfg), s.overdueSince ?? now));
     return { current, events };
   }
 
@@ -548,7 +574,7 @@ export function buildTimeline(s: TimerState, now: number): KinesisTimeline {
           chronoDown: false,
         },
       });
-      events.push(nag(end + alertIntervalMs(cfg)));
+      events.push(...nag(end + alertIntervalMs(cfg), s.overdueSince ?? end));
       break;
     } else {
       break;

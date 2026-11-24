@@ -28,7 +28,7 @@ import { SrbaiSheet } from './SrbaiSheet';
 import { SlipSheet } from './SlipSheet';
 import { HabitCelebration, milestoneText } from './HabitCelebration';
 import { StrengthRing, withAlpha } from './habitShared';
-import { ChainLine, ChainStrip, ShieldPips, chainA11y, chainCount, chainDoneToday } from './HabitChain';
+import { ChainLine, ChainStrip, ShieldPips, chainA11y, chainCount, chainDoneToday, chainUndoneToday } from './HabitChain';
 import { planSentence } from './habitShared';
 import { ECOLOGICO, ESPACIAL } from '../theme/tema';
 import { colors, radius, spacing, typography } from '../theme';
@@ -237,7 +237,18 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay, onProgress
       prev
         ? prev.map((i) =>
             i.habit.type === type
-              ? { ...i, stats: { ...i.stats, today, chain: isDone(today) ? chainDoneToday(i.stats.chain) : i.stats.chain } }
+              ? {
+                ...i,
+                stats: {
+                  ...i.stats,
+                  today,
+                  chain: isDone(today)
+                    ? chainDoneToday(i.stats.chain)
+                    : isDone(i.stats.today)
+                      ? chainUndoneToday(i.stats.chain)
+                      : i.stats.chain,
+                },
+              }
               : i,
           )
         : prev,
