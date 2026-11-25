@@ -1,3 +1,4 @@
+import { MediaVolume } from '../components/MediaVolume';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -200,6 +201,7 @@ export function YogaNidraScreen() {
           })
         )}
 
+        {playingNidra && <MediaVolume style={{ marginBottom: spacing.md }} />}
         {playingNidra && (
           <Button
             label={status === 'playing' ? 'Pausar' : 'Continuar'}

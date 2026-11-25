@@ -1,3 +1,4 @@
+import { MediaVolume } from './MediaVolume';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from './Card';
@@ -238,6 +239,7 @@ export function SequenceCard() {
         </View>
       )}
       {playing && items[index] && <Text style={styles.now}>Tocando: {items[index].label}</Text>}
+      {playing && <MediaVolume style={{ marginTop: 8 }} />}
     </Card>
   );
 }

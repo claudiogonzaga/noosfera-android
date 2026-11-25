@@ -8,6 +8,7 @@
 
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { getBreathingSound, type BreathingSoundId } from '../constants/breathingSounds';
+import { trackMediaPlayer, untrackMediaPlayer } from './mediaVolume';
 
 let active: AudioPlayer | null = null;
 let activeStatusSub: { remove: () => void } | null = null;
@@ -69,6 +70,7 @@ async function restoreDefaultAudioMode(): Promise<void> {
 }
 
 function release(player: AudioPlayer): void {
+  untrackMediaPlayer(player);
   try {
     player.remove();
   } catch {
@@ -168,6 +170,7 @@ export async function playBreathingSound(opts: {
     // durante o await: não cria o player.
     if (my !== gen) return false;
     const player = createAudioPlayer(source);
+    trackMediaPlayer(player); // o volume das trilhas, à parte do celular
     active = player;
     player.loop = opts.loop !== false;
     if (opts.stopAfterMs != null && opts.stopAfterMs > 0) {

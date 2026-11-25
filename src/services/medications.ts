@@ -753,7 +753,8 @@ export async function resetMedicationToday(medId: number): Promise<void> {
   } catch (err) {
     console.warn(`failed to reset medication ${medId}:`, err);
   }
-  await scheduleAllMedications();
+  // Reagendar tudo leva segundos: segue por trás, para o desmarcar aparecer na hora.
+  void scheduleAllMedications().catch(() => {});
 }
 
 /**

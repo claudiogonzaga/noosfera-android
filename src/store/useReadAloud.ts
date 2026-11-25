@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { trackMediaPlayer, untrackMediaPlayer } from '../services/mediaVolume';
 import { prepareReadAloudAudio, speakLongText, stopSpeaking } from '../services/voice';
 import { startReadAloudKeepAlive, stopReadAloudKeepAlive } from '../services/readAloudKeepAlive';
 import { READ_ALOUD_NATIVE } from '../services/geminiTTS';
@@ -142,6 +143,7 @@ function abortOngoingGeneration(): void {
 }
 
 function teardownPlayer() {
+  untrackMediaPlayer(player);
   try {
     sub?.remove();
   } catch {
@@ -201,6 +203,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     if (mine !== token) return; // um start mais novo assumiu durante o await
     teardownPlayer();
     const p = createAudioPlayer({ uri });
+    trackMediaPlayer(p);
     player = p;
     try {
       p.loop = false; // NUNCA repetir ao chegar no fim (sem loop)

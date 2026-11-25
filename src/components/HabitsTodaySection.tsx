@@ -52,7 +52,7 @@ import {
 } from '../services/habitos';
 import { dismissWeeklyReviewCard, reviewWeekStart, shouldShowWeeklyReviewCard } from '../services/habitCoach';
 import { getTodayTodos, type TodoItem } from '../services/todos';
-import { listMedications } from '../services/database';
+import { getDoneNudgeTypes, listMedications } from '../services/database';
 import { confirmMedication, resetMedicationToday, skipMedicationToday } from '../services/medications';
 import type { HabitAction, HabitDayStatus, HabitDef, HabitPeriod, MarkResult, TodayHabit } from '../types/habits';
 
@@ -112,11 +112,58 @@ function hhmmMin(hhmm: string): number {
 /** O cartão "Agora" só mostra o que chega em até este tanto de minutos. */
 const AGORA_ADIANTE_MIN = 30;
 
+interface ReminderRow {
+  id: number;
+  title: string;
+  time: string;
+  beads: string;
+  doneToday: boolean;
+  scheduledToday: boolean;
+}
+
+function isoDay(offset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Uma linha por lembrete ligado: feito (F), não feito (N), dia sem lembrete (O), hoje em aberto (H). */
+async function loadReminderRows(): Promise<ReminderRow[]> {
+  const list = (await listMedications()).filter((m) => m.enabled);
+  if (list.length === 0) return [];
+  const days = [6, 5, 4, 3, 2, 1, 0].map((i) => ({ i, iso: isoDay(i), dow: new Date(Date.now() - i * 86_400_000).getDay() }));
+  const done = await Promise.all(days.map((d) => getDoneNudgeTypes(d.iso).then((k) => new Set(k)).catch(() => new Set<string>())));
+  return list
+    .slice()
+    .sort((a, b) => a.time.localeCompare(b.time))
+    .map((m) => {
+      const key = `med:${m.id}`;
+      const on = (dow: number) => !m.daysOfWeek?.length || m.daysOfWeek.includes(dow);
+      let beads = '';
+      days.forEach((d, n) => {
+        if (done[n].has(key)) beads += 'F';
+        else if (!on(d.dow)) beads += 'O';
+        else beads += d.i === 0 ? 'H' : 'N';
+      });
+      return {
+        id: m.id,
+        title: m.name,
+        time: m.time,
+        beads,
+        doneToday: done[6].has(key),
+        scheduledToday: on(days[6].dow),
+      };
+    });
+}
+
 export function HabitsTodaySection({ refreshKey, snack, onPerfectDay, onProgress, onMarked, slot, extraChains }: Props) {
   const navigation = useNavigation<any>();
   const [items, setItems] = useState<TodayHabit[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [meds, setMeds] = useState<TodoItem[]>([]);
+  // Os LEMBRETES também são hábitos (pedido de 24/11/2026): cada um tem a sua linha
+  // na grade das correntes, com as contas dos últimos 7 dias.
+  const [reminderRows, setReminderRows] = useState<ReminderRow[]>([]);
   const [migration, setMigration] = useState<{
     habits: { type: string; title: string }[];
     reminders: { id: number; name: string }[];
@@ -138,6 +185,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay, onProgress
   const [moving, setMoving] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    loadReminderRows().then(setReminderRows).catch(() => {});
     try {
       setItems(await getTodayHabits());
       setFailed(false);
@@ -353,6 +401,32 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay, onProgress
     }
   };
 
+  /** Toque na linha do lembrete: marca o feito de hoje, ou desmarca — e aparece na hora. */
+  const onReminderTap = async (row: ReminderRow) => {
+    const willDo = !row.doneToday;
+    setReminderRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id
+          ? { ...r, doneToday: willDo, beads: `${r.beads.slice(0, -1)}${willDo ? 'F' : r.scheduledToday ? 'H' : 'O'}` }
+          : r,
+      ),
+    );
+    if (willDo) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      onMarked?.();
+    } else {
+      Haptics.selectionAsync().catch(() => {});
+    }
+    try {
+      if (willDo) await confirmMedication(row.id, { via: 'home' });
+      else await resetMedicationToday(row.id);
+      snack(willDo ? `Feito: ${row.title}` : `Desmarcado: ${row.title}`);
+    } catch {
+      snack('Não consegui marcar agora. Tente de novo.');
+    }
+    void load();
+  };
+
   // ——— cartões ———
   const moveToReminder = async (h: { type: string; title: string }) => {
     setMoving(h.type);
@@ -504,7 +578,7 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay, onProgress
         {slot}
 
         {/* ——— AS CORRENTES: uma conta por dia, ligadas pelo fio ——— */}
-        {(chainItems.length > 0 || (extraChains?.length ?? 0) > 0) && (
+        {(chainItems.length > 0 || reminderRows.length > 0 || (extraChains?.length ?? 0) > 0) && (
           <Card style={styles.card}>
             <Text style={styles.nowLabel}>AS CORRENTES · ÚLTIMOS 7 DIAS</Text>
             {chainItems.map((it) => (
@@ -528,6 +602,32 @@ export function HabitsTodaySection({ refreshKey, snack, onPerfectDay, onProgress
                   <ShieldPips shields={it.stats.chain.shields} cap={it.stats.chain.cap} size={12} />
                 </View>
                 <ChainLine chain={it.stats.chain} count={7} fill contas ink={BEAD_INK} r={8} height={30} />
+              </Pressable>
+            ))}
+            {reminderRows.map((r) => (
+              <Pressable
+                key={`med-${r.id}`}
+                style={styles.beadRow}
+                onPress={() => void onReminderTap(r)}
+                accessibilityRole="button"
+                accessibilityLabel={`${r.title}, lembrete das ${r.time}${r.doneToday ? ', feito hoje' : ''}`}
+                accessibilityHint={r.doneToday ? 'Toque para desmarcar hoje.' : 'Toque para marcar hoje.'}
+              >
+                <View style={styles.beadHead}>
+                  <Text style={styles.beadTitle} numberOfLines={1}>
+                    {cap(r.title)}
+                  </Text>
+                  <Text style={styles.beadNote}>{r.doneToday ? 'feito hoje' : r.scheduledToday ? r.time : 'hoje não'}</Text>
+                </View>
+                <ChainLine
+                  chain={{ unit: 'dia', length: 0, best: 0, shields: 0, cap: 1, nextShieldIn: null, lost: null, beads: r.beads, atRisk: false }}
+                  count={7}
+                  fill
+                  contas
+                  ink={BEAD_INK}
+                  r={8}
+                  height={30}
+                />
               </Pressable>
             ))}
             {(extraChains ?? []).map((x) => (

@@ -1,3 +1,4 @@
+import { MediaVolume } from '../components/MediaVolume';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -154,6 +155,7 @@ function PlayerBar() {
         </View>
         <AudioScrubber progress={progress} onSeek={seek} disabled={duration <= 0} />
       </View>
+      <MediaVolume style={{ marginTop: 8 }} />
     </View>
   );
 }

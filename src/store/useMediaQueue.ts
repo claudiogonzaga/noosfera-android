@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { trackMediaPlayer, untrackMediaPlayer } from '../services/mediaVolume';
 import { registerPlayer, claimPlayback } from '../services/playerBus';
 
 // Fila de mídia: toca uma lista de faixas EM SEQUÊNCIA, com áudio em segundo
@@ -102,6 +103,7 @@ function clearSub() {
 
 function release() {
   if (player) {
+    untrackMediaPlayer(player);
     try {
       player.pause();
       player.remove();
@@ -125,6 +127,7 @@ export const useMediaQueue = create<MediaQueueState>((set, get) => {
     set({ index: i, status: 'playing' });
     try {
       const p = createAudioPlayer(item.source);
+      trackMediaPlayer(p);
       player = p;
       p.loop = !!item.loop;
       endAt = item.stopAfterMs && item.stopAfterMs > 0 ? Date.now() + item.stopAfterMs : 0;

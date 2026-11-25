@@ -1,3 +1,4 @@
+import { MediaVolume } from '../components/MediaVolume';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -212,6 +213,8 @@ export function BreathingScreen() {
           </Text>
           <Text style={styles.timerSub}>{running ? 'respirando…' : 'pronto?'}</Text>
         </View>
+
+        <MediaVolume style={{ marginTop: spacing.lg }} />
 
         <View style={styles.actions}>
           {!running ? (
