@@ -2,7 +2,7 @@
   "expo": {
     "name": "Noosfera",
     "slug": "comentor",
-    "version": "1.136.6",
+    "version": "1.137.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -47,6 +47,67 @@
         "android.permission.health.READ_HEART_RATE",
         "android.permission.health.READ_WEIGHT",
         "android.permission.health.READ_BODY_FAT"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "www.youtube.com",
+              "pathPrefix": "/watch"
+            },
+            {
+              "scheme": "https",
+              "host": "www.youtube.com",
+              "pathPrefix": "/shorts/"
+            },
+            {
+              "scheme": "https",
+              "host": "www.youtube.com",
+              "pathPrefix": "/live/"
+            },
+            {
+              "scheme": "https",
+              "host": "m.youtube.com",
+              "pathPrefix": "/watch"
+            },
+            {
+              "scheme": "https",
+              "host": "m.youtube.com",
+              "pathPrefix": "/shorts/"
+            },
+            {
+              "scheme": "https",
+              "host": "m.youtube.com",
+              "pathPrefix": "/live/"
+            },
+            {
+              "scheme": "https",
+              "host": "youtube.com",
+              "pathPrefix": "/watch"
+            },
+            {
+              "scheme": "https",
+              "host": "youtube.com",
+              "pathPrefix": "/shorts/"
+            },
+            {
+              "scheme": "https",
+              "host": "youtube.com",
+              "pathPrefix": "/live/"
+            },
+            {
+              "scheme": "https",
+              "host": "youtu.be"
+            }
+          ]
+        }
       ]
     },
     "web": {
@@ -131,6 +192,9 @@
     "updates": {
       "url": "https://u.expo.dev/78ad8365-ab78-4722-8fd7-17b1e8546f6d"
     },
-    "scheme": "askesis"
+    "scheme": [
+      "askesis",
+      "noosfera"
+    ]
   }
 }

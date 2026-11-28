@@ -19,6 +19,7 @@ import { startAspis } from './src/aspis/bootstrap';
 import { MiniPlayerHost } from './src/aspis/components/MiniPlayer';
 import { XHarvester } from './src/aspis/components/XHarvester';
 import { startAutoRefresh } from './src/aspis/services/autoRefresh';
+import { extractVideoId, watchUrl } from './src/aspis/utils/videoId';
 import { startKairos } from './src/kairos/store';
 import { startKinesis } from './src/kinesis/store';
 import { startZazen } from './src/zazen/store';
@@ -138,6 +139,17 @@ export default function App() {
         navigationRef.current.navigate('Main', { screen: 'Zazen' });
       } else if (url?.startsWith('askesis://comentora') && navigationRef.current?.isReady?.()) {
         navigationRef.current.navigate('Main', { screen: 'Home' });
+      } else if (url && navigationRef.current?.isReady?.()) {
+        // v1.137: noosfera://yt/<id> (link dos relatórios, via consciencia.eco.br/v/<id>)
+        // ou um link do YouTube aberto no Noosfera: a mesma análise do Compartilhar.
+        const m = url.match(/^(?:noosfera|askesis):\/\/(?:yt|youtube|v|video)\/([A-Za-z0-9_-]{11})/i);
+        const id = m ? m[1] : (/youtu\.?be/i.test(url) ? extractVideoId(url) : null);
+        if (id) {
+          navigationRef.current.navigate('Main', {
+            screen: 'Aspis',
+            params: { screen: 'Share', initial: false, params: { sharedText: watchUrl(id) } },
+          });
+        }
       }
     };
     void Linking.getInitialURL().then(open).catch(() => {});
